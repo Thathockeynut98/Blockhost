@@ -50,7 +50,7 @@ const templates={
   proxy:{name:"Proxy",type:"Proxy",software:"Velocity",memory:2048,cpu:1,disk:5,description:"Velocity network gateway for backend servers."},
   vanilla:{name:"Vanilla",type:"Vanilla",software:"Vanilla",memory:3072,cpu:2,disk:15,description:"Official vanilla Minecraft server."}
 };
-const softwareType={Paper:"PAPER",Spigot:"SPIGOT",Fabric:"FABRIC",Forge:"FORGE",NeoForge:"NEOFORGE",Vanilla:"VANILLA"};
+const softwareType={Paper:"PAPER",Spigot:"SPIGOT",Fabric:"FABRIC",Forge:"FORGE",NeoForge:"NEOFORGE",Purpur:"PURPUR",Pufferfish:"PUFFERFISH",Leaf:"LEAF",Folia:"FOLIA",Vanilla:"VANILLA"};
 const proxySoftware=new Set(["Velocity","Waterfall"]);
 function volumeName(id){return `blockhost_${id.replace(/[^a-zA-Z0-9_-]/g,"_")}`}
 function containerName(id){return `blockhost-${id.replace(/[^a-zA-Z0-9_-]/g,"-")}`}
@@ -311,7 +311,7 @@ app.post("/api/instances/import-folder",auth,admin,folderUpload.array("serverFil
   try{
     restoreUploadedFolder(req.files,temp);
     const root=findImportRoot(temp);const detected=detectImportedSoftware(root);const props=parseImportedProperties(root);
-    const software=["Velocity","Waterfall","Paper","Spigot","Fabric","Forge","NeoForge","Vanilla"].includes(req.body.software)?req.body.software:detected;
+    const software=["Velocity","Waterfall","Paper","Spigot","Fabric","Forge","NeoForge","Purpur","Pufferfish","Leaf","Folia","Vanilla"].includes(req.body.software)?req.body.software:detected;
     const folderName=path.basename(String(req.files[0].originalname).replaceAll("\\","/").split("/")[0])||"Imported Server";
     const id=idify(req.body.id||req.body.name||folderName);if(db.instances[id])throw new Error("That server ID already exists");
     const port=await allocPort(req.body.port||props["server-port"]);const rconPort=await allocRcon(req.body.rconPort);const eulaFile=path.join(root,"eula.txt");const existingEula=fs.existsSync(eulaFile)&&/eula\s*=\s*true/i.test(fs.readFileSync(eulaFile,"utf8"));const accepted=existingEula||String(req.body.acceptEula)==="true";
@@ -334,7 +334,7 @@ app.post("/api/instances/import",auth,admin,upload.single("archive"),async(req,r
     else if(name.endsWith(".tar"))await new Promise((resolve,reject)=>execFile("tar",["-xf",req.file.path,"-C",temp],e=>e?reject(e):resolve()));
     else throw new Error("Unsupported archive. Use ZIP, TAR, or TAR.GZ.");
     const root=findImportRoot(temp);const detected=detectImportedSoftware(root);const props=parseImportedProperties(root);
-    const software=["Velocity","Waterfall","Paper","Spigot","Fabric","Forge","NeoForge","Vanilla"].includes(req.body.software)?req.body.software:detected;
+    const software=["Velocity","Waterfall","Paper","Spigot","Fabric","Forge","NeoForge","Purpur","Pufferfish","Leaf","Folia","Vanilla"].includes(req.body.software)?req.body.software:detected;
     const id=idify(req.body.id||req.body.name||path.basename(req.file.originalname).replace(/\.(zip|tar|gz|tgz)$/gi,""));if(db.instances[id])throw new Error("That server ID already exists");
     const port=await allocPort(req.body.port||props["server-port"]);const rconPort=await allocRcon(req.body.rconPort);const eulaFile=path.join(root,"eula.txt");const existingEula=fs.existsSync(eulaFile)&&/eula\s*=\s*true/i.test(fs.readFileSync(eulaFile,"utf8"));const accepted=existingEula||String(req.body.acceptEula)==="true";
     if(!accepted)throw new Error("This server does not contain an accepted eula.txt. Confirm the Minecraft EULA in the import dialog.");
@@ -375,7 +375,7 @@ app.post("/api/invites/:id/accept",auth,async(req,res)=>{const i=db.invites[req.
 app.get("/api/players",auth,instanceAuth,async(req,res)=>{try{const out=await docker(["exec",containerName(req.instance.id),"rcon-cli","list"]);const m=out.match(/There are (\d+) of a max of (\d+) players online(?:: (.*))?/i);res.json({count:Number(m?.[1]||0),max:Number(m?.[2]||req.instance.maxPlayers||0),players:m?.[3]?m[3].split(", ").filter(Boolean):[]})}catch(e){res.json({count:0,max:req.instance.maxPlayers||0,players:[],error:e.message})}});
 app.post("/api/player/action",auth,instanceAuth,async(req,res)=>{const allowed=["op","deop","kick","ban","pardon","whitelist add","whitelist remove"];const action=String(req.body.action||"");const name=String(req.body.name||"");if(!allowed.includes(action)||!name)return res.status(400).end();try{await docker(["exec",containerName(req.instance.id),"rcon-cli",...action.split(" "),name]);res.json({ok:true})}catch(e){res.status(500).json({error:e.message})}});
 app.post("/api/mods/install",auth,instanceAuth,async(req,res)=>{try{const project=encodeURIComponent(req.body.project||"");const loader=req.instance.software.toLowerCase();const version=req.instance.version;const r=await fetch(`https://api.modrinth.com/v2/project/${project}/version?game_versions=%5B%22${encodeURIComponent(version)}%22%5D&loaders=%5B%22${encodeURIComponent(loader)}%22%5D`);if(!r.ok)throw Error(`Modrinth ${r.status}`);const versions=await r.json();const v=versions[0];const f=v?.files?.find(z=>z.primary)||v?.files?.[0];if(!f)throw Error("No compatible file found");const bin=Buffer.from(await (await fetch(f.url)).arrayBuffer());const dir=(loader==="paper"||loader==="spigot")?"plugins":"mods";const b64=bin.toString("base64");await volumeCmd(req.instance,`mkdir -p ${vroot(req.instance)}/${dir}; echo '${b64}' | base64 -d > ${vroot(req.instance)}/${dir}/${path.basename(f.filename).replaceAll("'","'\\''")}`);res.json({ok:true,file:f.filename})}catch(e){res.status(500).json({error:e.message})}});
-app.get("/api/installer/catalog",auth,async(_,res)=>res.json({software:["Vanilla","Paper","Fabric","Forge","NeoForge","Velocity","Waterfall"],versions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1","1.20.6","1.20.4","1.20.1"],note:"Containerized installers use itzg images and pull the selected version at first start."}));
+app.get("/api/installer/catalog",auth,async(_,res)=>res.json({software:["Vanilla","Paper","Purpur","Pufferfish","Leaf","Folia","Spigot","Fabric","Forge","NeoForge","Velocity","Waterfall"],versions:["LATEST","1.21.11","1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1","1.20.6","1.20.4","1.20.1"],note:"Containerized installers use itzg images and pull the selected version at first start."}));
 app.get("/api/metrics",auth,instanceAuth,async(req,res)=>res.json(await containerStats(req.instance)));
 
 app.get("/api/proxy/backends",auth,instanceAuth,(req,res)=>{if(!proxySoftware.has(req.instance.software))return res.status(400).json({error:"Current instance is not a proxy"});res.json(req.instance.backends||[])});
@@ -458,7 +458,7 @@ app.post("/api/docker-import",auth,admin,async(req,res)=>{
   while(db.instances[newId])newId=base.slice(0,35)+"-"+n++;
   const port=await allocPort(),rconPort=await allocRcon();
   const type=String(env.TYPE||"VANILLA").toUpperCase();
-  const supported={VANILLA:"Vanilla",PAPER:"Paper",SPIGOT:"Spigot",PURPUR:"Purpur",FABRIC:"Fabric",FORGE:"Forge",NEOFORGE:"NeoForge"};
+  const supported={VANILLA:"Vanilla",PAPER:"Paper",SPIGOT:"Spigot",PURPUR:"Purpur",PUFFERFISH:"Pufferfish",LEAF:"Leaf",FOLIA:"Folia",FABRIC:"Fabric",FORGE:"Forge",NEOFORGE:"NeoForge"};
   if(!supported[type])return res.status(400).json({error:"Unsupported server type: "+type});
   x={id:newId,name,template:"survival",type:"Imported",software:supported[type],version:String(env.VERSION||"LATEST").slice(0,40),
     port,rconPort,memory:safeNum((()=>{const m=String(env.MEMORY||"3072M").match(/^([0-9]+)\\s*([GMK])?/i);if(!m)return 3072;const n=Number(m[1]);return m[2]?.toUpperCase()==="G"?n*1024:m[2]?.toUpperCase()==="K"?Math.ceil(n/1024):n})(),3072,512,65536),cpu:2,disk:20,
