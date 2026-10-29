@@ -377,6 +377,34 @@ app.post("/api/player/action",auth,instanceAuth,async(req,res)=>{const allowed=[
 app.post("/api/mods/install",auth,instanceAuth,async(req,res)=>{try{const project=encodeURIComponent(req.body.project||"");const loader=req.instance.software.toLowerCase();const version=req.instance.version;const r=await fetch(`https://api.modrinth.com/v2/project/${project}/version?game_versions=%5B%22${encodeURIComponent(version)}%22%5D&loaders=%5B%22${encodeURIComponent(loader)}%22%5D`);if(!r.ok)throw Error(`Modrinth ${r.status}`);const versions=await r.json();const v=versions[0];const f=v?.files?.find(z=>z.primary)||v?.files?.[0];if(!f)throw Error("No compatible file found");const bin=Buffer.from(await (await fetch(f.url)).arrayBuffer());const dir=(loader==="paper"||loader==="spigot")?"plugins":"mods";const b64=bin.toString("base64");await volumeCmd(req.instance,`mkdir -p ${vroot(req.instance)}/${dir}; echo '${b64}' | base64 -d > ${vroot(req.instance)}/${dir}/${path.basename(f.filename).replaceAll("'","'\\''")}`);res.json({ok:true,file:f.filename})}catch(e){res.status(500).json({error:e.message})}});
 app.get("/api/installer/catalog",auth,async(_,res)=>res.json({software:["Vanilla","Paper","Purpur","Pufferfish","Leaf","Folia","Spigot","Fabric","Forge","NeoForge","Velocity","Waterfall"],versions:["LATEST","1.21.11","1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.3","1.21.2","1.21.1","1.21","1.20.6","1.20.5","1.20.4","1.20.3","1.20.2","1.20.1","1.20","1.19.4","1.19.3","1.19.2","1.19.1","1.19","1.18.2","1.18.1","1.18","1.17.1","1.17","1.16.5","1.16.4","1.16.3","1.16.2","1.16.1","1.16","1.15.2","1.15.1","1.15","1.14.4","1.14.3","1.14.2","1.14.1","1.14","1.13.2","1.13.1","1.13","1.12.2","1.12.1","1.12","1.11.2","1.11.1","1.11","1.10.2","1.10.1","1.10","1.9.4","1.9.3","1.9.2","1.9.1","1.9","1.8.9","1.8.8","1.8.7","1.8.6","1.8.5","1.8.4","1.8.3","1.8.2","1.8.1","1.8"],note:"Containerized installers use itzg images and pull the selected version at first start."}));
 app.get("/api/metrics",auth,instanceAuth,async(req,res)=>res.json(await containerStats(req.instance)));
+// Live telemetry is sampled per instance; network rates are derived from cumulative Docker counters.
+const telemetryCache=new Map();
+async function rconTelemetry(x,command){
+ try{return await Promise.race([
+  docker(["exec",containerName(x.id),"rcon-cli",...command.split(" ")]),
+  new Promise((_,reject)=>setTimeout(()=>reject(new Error("RCON timeout")),1800))
+ ])}catch{return null}
+}
+app.get("/api/telemetry",auth,instanceAuth,async(req,res)=>{
+ const x=req.instance;
+ const running=(await statusOf(x))==="running";
+ const prev=telemetryCache.get(x.id);
+ if(prev&&Date.now()-prev.at<2500)return res.json(prev.data);
+ if(!running){telemetryCache.delete(x.id);return res.json({running:false,players:null,maxPlayers:null,tps:null,mspt:null,rxRate:0,txRate:0,metrics:{cpu:0,ram:0},timestamp:Date.now()})}
+ const metrics=await containerStats(x);
+ const timestamp=Date.now();
+ const elapsed=prev?Math.max(0.001,(timestamp-prev.at)/1000):0;
+ const rxRate=elapsed?Math.max(0,(metrics.rx-prev.data.rxTotal)/elapsed):0;
+ const txRate=elapsed?Math.max(0,(metrics.tx-prev.data.txTotal)/elapsed):0;
+ const [list,tpsText,msptText]=await Promise.all([rconTelemetry(x,"list"),rconTelemetry(x,"tps"),rconTelemetry(x,"mspt")]);
+ const playerMatch=list?.match(/There are (\\d+) of a max of (\\d+) players online/i);
+ const tpsMatch=tpsText?.match(/(?:TPS from last[^:]*:|TPS:)\\s*[^\\d]*(\\d+(?:\\.\\d+)?)/i);
+ const msptMatch=msptText?.match(/(?:MSPT[^:]*:|Mean tick time:)\\s*[^\\d]*(\\d+(?:\\.\\d+)?)/i);
+ const data={running:true,players:playerMatch?Number(playerMatch[1]):null,maxPlayers:playerMatch?Number(playerMatch[2]):null,tps:tpsMatch?Number(tpsMatch[1]):null,mspt:msptMatch?Number(msptMatch[1]):null,rxRate,txRate,rxTotal:metrics.rx,txTotal:metrics.tx,metrics:{cpu:metrics.cpu,ram:metrics.ram},timestamp};
+ telemetryCache.set(x.id,{at:timestamp,data});
+ res.json(data);
+});
+
 
 app.get("/api/proxy/backends",auth,instanceAuth,(req,res)=>{if(!proxySoftware.has(req.instance.software))return res.status(400).json({error:"Current instance is not a proxy"});res.json(req.instance.backends||[])});
 app.put("/api/proxy/backends",auth,instanceAuth,async(req,res)=>{if(!proxySoftware.has(req.instance.software))return res.status(400).json({error:"Current instance is not a proxy"});req.instance.backends=(req.body.backends||[]).map(b=>({name:idify(b.name),instanceId:b.instanceId})).filter(b=>db.instances[b.instanceId]&&b.instanceId!==req.instance.id);for(const b of req.instance.backends){const backend=db.instances[b.instanceId];backend.proxyBackend=true;}
