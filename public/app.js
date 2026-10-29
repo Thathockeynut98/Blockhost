@@ -26,6 +26,7 @@ async function listFiles(p=''){
    (p?'<div class="file"><a href="#" onclick="listFiles('+JSON.stringify(p.split('/').slice(0,-1).join('/')).replaceAll('"','&quot;')+');return false">⬅ Parent folder</a></div>':'')+
    (files.length?files.map(x=>'<div class="file"><a href="#" data-path="'+escAttr(x.path)+'" data-kind="'+x.type+'">'+(x.type==='dir'?'📁 ':'📄 ')+esc(x.name)+'</a><span>'+ (x.type==='file'?formatBytes(x.size):'Folder')+'</span><span class="row"><button class="ghost" data-action="download" data-path="'+escAttr(x.path)+'">Download</button><button class="ghost" data-action="rename" data-path="'+escAttr(x.path)+'">Rename</button><button class="danger" data-action="delete" data-path="'+escAttr(x.path)+'">Delete</button></span></div>').join(''):'<p class="muted">This folder is empty.</p>');
   area.querySelectorAll('a[data-path]').forEach(link=>link.addEventListener('click',e=>{e.preventDefault();const path=link.dataset.path;if(link.dataset.kind==='dir')listFiles(path);else openText(path)}));
+  area.querySelectorAll('a[data-path]').forEach(link=>link.addEventListener('contextmenu',e=>{e.preventDefault();showFileMenu(e,link.dataset.path,link.dataset.kind)}));
   area.querySelectorAll('button[data-action]').forEach(button=>button.addEventListener('click',async()=>{
    const action=button.dataset.action,path=button.dataset.path;
    if(action==='download')await downloadServerFile(path);
@@ -69,7 +70,7 @@ async function openText(p){
  try{
   const r=await fetch('/api/file?path='+encodeURIComponent(p),{headers:{Authorization:'Bearer '+TOKEN,'X-Instance-Id':INSTANCE}});
   if(!r.ok)throw Error(await r.text());
-  $('editor').value=await r.text();
+  $('editor').value=await r.text();$('editorFileLabel').textContent=p;highlightEditor();
  }catch(e){alert('Unable to open file: '+e.message);}
 }
 async function openFile(){openText($('filePath').value)}
@@ -86,11 +87,73 @@ async function newFolder(){
  if(name.includes('/')||name.includes('\\')||name==='.'||name==='..')return alert('Enter a single folder name.');
  try{await api('/api/folder','POST',{path:(currentFolder?currentFolder+'/':'')+name});listFiles(currentFolder)}catch(e){alert(e.message)}
 }
-async function uploadFile(){
- const f=$('fileUpload').files[0];if(!f)return;
- const fd=new FormData();fd.append('file',f);fd.append('path',currentFolder);
- try{await raw('/api/upload',{method:'POST',body:fd});$('fileUpload').value='';listFiles(currentFolder)}catch(e){alert('Upload failed: '+e.message)}
+async function uploadFiles(files){
+ if(!files.length)return;
+ const folder=currentFolder,errors=[];
+ for(const f of files){
+  const fd=new FormData();fd.append('file',f);fd.append('path',folder);
+  try{await raw('/api/upload',{method:'POST',body:fd})}catch(e){errors.push(f.name+': '+e.message)}
+ }
+ await listFiles(folder);
+ if(errors.length)alert('Some uploads failed:\\n'+errors.join('\\n'));
 }
+async function uploadFile(){const files=Array.from($('fileUpload').files);$('fileUpload').value='';await uploadFiles(files)}
+
+
+function showFileMenu(e,path,kind){
+ const menu=$('fileContextMenu');if(!menu)return;
+ menu.innerHTML='';
+ for(const [label,fn] of [
+  ...(kind==='file'&&textFilePattern.test(path)?[['Edit',()=>openText(path)]]:[]),
+  ['Download',()=>downloadServerFile(path)],
+  ['Rename',()=>renameServerFile(path)],
+  ['Delete',()=>deleteServerFile(path)]
+ ]){
+  const button=document.createElement('button');button.type='button';button.textContent=label;
+  button.addEventListener('click',()=>{hideFileMenu();fn()});menu.append(button);
+ }
+ menu.hidden=false;
+ menu.style.left=Math.max(8,Math.min(e.clientX,innerWidth-menu.offsetWidth-8))+'px';
+ menu.style.top=Math.max(8,Math.min(e.clientY,innerHeight-menu.offsetHeight-8))+'px';
+}
+function hideFileMenu(){const menu=$('fileContextMenu');if(menu)menu.hidden=true}
+document.addEventListener('click',e=>{if(!e.target.closest('#fileContextMenu'))hideFileMenu()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')hideFileMenu()});
+function highlightEditor(){
+ const input=$('editor'),display=$('editorHighlight');if(!input||!display)return;
+ const source=input.value;
+ // Tokenize into non-overlapping spans so inserted markup never corrupts source text.
+ const token=/#[^\n]*|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:true|false|null|yes|no|enabled|disabled)\b|\b\d+(?:\.\d+)?\b|^[ \t]*[A-Za-z_][\w.-]*(?=\s*[:=])/gm;
+ const escapeHTML=t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+ let html='',last=0,match;
+ while((match=token.exec(source))){
+  html+=escapeHTML(source.slice(last,match.index));
+  const value=match[0],cls=/^(#|\/\/)/.test(value)?'syntax-comment':/^["']/.test(value)?'syntax-string':/^\d/.test(value)?'syntax-number':/^(true|false|null|yes|no|enabled|disabled)$/.test(value)?'syntax-symbol':'syntax-key';
+  html+='<span class="'+cls+'">'+escapeHTML(value)+'</span>';
+  last=token.lastIndex;
+ }
+ display.innerHTML=html+escapeHTML(source.slice(last))+'\n';
+ display.scrollTop=input.scrollTop;display.scrollLeft=input.scrollLeft;
+}
+function initializeFileExplorer(){
+ const zone=$('fileDropZone'),hint=$('fileDropHint'),editor=$('editor');
+ if(!zone||zone.dataset.initialized)return;
+ zone.dataset.initialized='true';
+ let depth=0;
+ zone.addEventListener('dragenter',e=>{if(!e.dataTransfer?.types.includes('Files'))return;e.preventDefault();depth++;zone.classList.add('dragOver');hint.hidden=false});
+ zone.addEventListener('dragover',e=>{if(!e.dataTransfer?.types.includes('Files'))return;e.preventDefault();e.dataTransfer.dropEffect='copy'});
+ zone.addEventListener('dragleave',e=>{e.preventDefault();depth=Math.max(0,depth-1);if(!depth){zone.classList.remove('dragOver');hint.hidden=true}});
+ zone.addEventListener('drop',e=>{e.preventDefault();depth=0;zone.classList.remove('dragOver');hint.hidden=true;uploadFiles(Array.from(e.dataTransfer.files))});
+ editor.addEventListener('input',highlightEditor);
+ editor.addEventListener('scroll',()=>{const h=$('editorHighlight');h.scrollTop=editor.scrollTop;h.scrollLeft=editor.scrollLeft});
+ editor.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveFile()}
+  if(e.key==='Tab'){e.preventDefault();const start=editor.selectionStart,end=editor.selectionEnd;editor.setRangeText('  ',start,end,'end');highlightEditor()}
+ });
+ highlightEditor();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeFileExplorer);else initializeFileExplorer();
+
 let consolePollTimer=null,consoleFetching=false,consoleInstance='';
 async function refreshConsole(force=false){
  const output=$('consoleOutput');if(!output||consoleFetching||!INSTANCE)return;
