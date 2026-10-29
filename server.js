@@ -131,6 +131,65 @@ app.post("/api/command",auth,instanceAuth,async(req,res)=>{const c=String(req.bo
 async function volumeCmd(x,args,input){await ensureVolume(x);const root=proxySoftware.has(x.software)?"/server":"/data";return docker(["run","--rm",...(input!==undefined?["-i"]:[]),"-v",`${volumeName(x.id)}:${root}`,"alpine","sh","-lc",args],{input})}
 function vroot(x){return proxySoftware.has(x.software)?"/server":"/data"}
 function vpath(x,p){const s=String(p||"").replaceAll("\\","/").replace(/^\/+/,"");if(s.includes(".."))return null;return `${vroot(x)}/${s}`}
+
+/* File manager: operate on the same persistent Docker volume mounted by Minecraft.
+   All paths are relative to /data (or /server for proxy instances). */
+function fileRelative(value,{allowRoot=false}={}){
+ const p=String(value??"").replaceAll("\\\\","/").replace(/^\\/+|\\/+$/g,"");
+ if(!p&&allowRoot)return "";
+ if(!p||p.length>1024||p.split("/").some(x=>!x||x==="."||x===".."||/[\\x00-\\x1f]/.test(x)))throw new Error("Invalid file path");
+ return p;
+}
+function shellArg(s){return "'"+String(s).replaceAll("'","'\\''")+"'";}
+function fileError(res,e){res.status(400).json({error:e.message||"File operation failed"});}
+app.get("/api/files",auth,instanceAuth,async(req,res)=>{
+ try{
+  const rel=fileRelative(req.query.path,{allowRoot:true});
+  const base=vroot(req.instance),target=base+(rel?"/"+rel:"");
+  const command="cd "+shellArg(target)+" && find . -mindepth 1 -maxdepth 1 -exec stat -c '%F|%s|%n' {} \\;";
+  const out=await volumeCmd(req.instance,command);
+  const rows=out.split(/\\r?\\n/).filter(Boolean).map(line=>{
+   const m=line.match(/^([^|]+)\\|(\\d+)\\|\\.\\/(.*)$/);
+   if(!m)return null;
+   const name=m[3],type=m[1].includes("directory")?"dir":m[1].includes("regular file")?"file":"other";
+   return {name,type,size:Number(m[2]),path:rel?rel+"/"+name:name};
+  }).filter(x=>x&&x.type!=="other");
+  rows.sort((a,b)=>(a.type==="dir"?0:1)-(b.type==="dir"?0:1)||a.name.localeCompare(b.name));
+  res.json(rows);
+ }catch(e){fileError(res,e)}
+});
+app.get("/api/file",auth,instanceAuth,async(req,res)=>{
+ try{
+  const rel=fileRelative(req.query.path);
+  const target=vroot(req.instance)+"/"+rel;
+  const limit=2*1024*1024;
+  const command="test -f "+shellArg(target)+" && test $(wc -c < "+shellArg(target)+") -le "+limit+" && cat "+shellArg(target);
+  const content=await volumeCmd(req.instance,command);
+  if(content.includes("\\u0000"))return res.status(415).send("Binary files cannot be edited as text");
+  res.type("text/plain; charset=utf-8").send(content);
+ }catch(e){fileError(res,e)}
+});
+app.put("/api/file",auth,instanceAuth,express.json({limit:"2mb"}),async(req,res)=>{
+ try{
+  const rel=fileRelative(req.body.path),content=req.body.content;
+  if(typeof content!=="string"||Buffer.byteLength(content,"utf8")>2*1024*1024)throw new Error("Text content exceeds 2 MB");
+  if(content.includes("\\u0000"))throw new Error("Binary content is not supported");
+  const target=vroot(req.instance)+"/"+rel;
+  const parent=target.slice(0,target.lastIndexOf("/"));
+  // Write to a temporary file and rename to avoid partial saves.
+  const command="mkdir -p "+shellArg(parent)+" && cat > "+shellArg(target+".blockhost-tmp")+" && mv "+shellArg(target+".blockhost-tmp")+" "+shellArg(target);
+  await volumeCmd(req.instance,command,content);
+  res.json({ok:true});
+ }catch(e){fileError(res,e)}
+});
+app.post("/api/folder",auth,instanceAuth,async(req,res)=>{
+ try{
+  const rel=fileRelative(req.body.path);
+  await volumeCmd(req.instance,"mkdir -p "+shellArg(vroot(req.instance)+"/"+rel));
+  res.json({ok:true});
+ }catch(e){fileError(res,e)}
+});
+
 const upload=multer({dest:path.join(DATA,"uploads"),limits:{fileSize:8*1024*1024*1024}});
 const folderUpload=multer({dest:path.join(DATA,"folder-uploads"),limits:{fileSize:8*1024*1024*1024,files:100000}});
 function safeRelativeUploadPath(value){
