@@ -11,7 +11,7 @@ async function loadInstances(){const xs=await raw('/api/instances');if(!xs.lengt
 async function switchInstance(id){if(settingsDirty&&!confirm('Discard unsaved Minecraft settings?'))return;INSTANCE=id;localStorage.setItem('blockhost_instance',id);await refresh();if(dbTab==='settings')loadMinecraftSettings();if(dbTab==='console')refreshConsole(true)}
 async function refresh(){const s=await raw('/api/status');const x=s.instance;$('hero').innerHTML=`<div class="eyebrow">${esc(x.type)} SERVER</div><h2>${esc(x.name)}</h2><p>${esc(x.software)} · Minecraft ${esc(x.version)} · ${x.memory} MB RAM · ${x.cpu} CPU · public port ${x.port}</p><span class="pill">Docker: ${esc(x.container||'not created')}</span>`;$('status').textContent=s.status;$('playersCount').textContent='—';$('cpu').textContent=s.metrics.cpu.toFixed(1)+'%';$('cpuLimit').textContent='limit '+x.cpu+' CPU';$('ram').textContent=Math.round(s.metrics.ram/1048576)+' MB';$('ramLimit').textContent='limit '+x.memory+' MB';$('net').textContent=Math.round((s.metrics.rx+s.metrics.tx)/1024)+' KB/s';$('port').textContent=x.port;$('containerName').textContent=x.container||'—';$('cpuBar').style.width=Math.min(100,s.metrics.cpu/Math.max(.1,x.cpu*100)*100)+'%';$('installRam').value=x.memory;$('installCpu').value=x.cpu;$('setName').value=x.name;$('setPort').value=x.port;$('setRam').value=x.memory;$('setCpu').value=x.cpu;$('setMax').value=x.maxPlayers||20;$('setMode').value=x.gamemode||'survival';try{const c=await raw('/api/console');$('dashConsole').textContent=c.slice(-60).join('\n')}catch{}} 
 async function serverAction(a){try{await api(`/api/instances/${INSTANCE}/${a}`,'POST');setTimeout(refresh,500)}catch(e){alert(e.message)}}
-let dbTab='dashboard';function tab(id){if(dbTab==='console')stopConsolePolling();dbTab=id;document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='files')listFiles();if(id==='backups')loadBackups();if(id==='schedules')loadSchedules();if(id==='proxy')loadBackends();if(id==='players')loadPlayers();if(id==='settings')loadMinecraftSettings();if(id==='console')startConsolePolling()}
+let dbTab='dashboard';function tab(id){if(dbTab==='console')stopConsolePolling();dbTab=id;document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='files')listFiles();if(id==='publicAccess')refreshPublicAccess();if(id==='backups')loadBackups();if(id==='schedules')loadSchedules();if(id==='proxy')loadBackends();if(id==='players')loadPlayers();if(id==='settings')loadMinecraftSettings();if(id==='console')startConsolePolling()}
 async function loadSetup(){const c=await raw('/api/installer/catalog');$('soft').innerHTML=c.software.map(x=>`<option>${x}</option>`).join('');$('ver').innerHTML=c.versions.map(x=>`<option>${x}</option>`).join('');const s=await raw('/api/status');$('soft').value=s.instance.software;$('ver').value=s.instance.version;$('templateInfo').textContent=templatesText(s.instance.template)}
 function templatesText(t){return ({survival:'Survival · Paper · 4GB · 2 CPU',creative:'Creative · Paper · 3GB · 2 CPU',modded:'Modded · Fabric · 6GB · 4 CPU',proxy:'Proxy · Velocity · 2GB · 1 CPU',vanilla:'Vanilla · Vanilla · 3GB · 2 CPU'})[t]||'Custom server'}
 async function applyInstall(){try{await api(`/api/instances/${INSTANCE}`,'PUT',{software:$('soft').value,version:$('ver').value,memory:Number($('installRam').value),cpu:Number($('installCpu').value)});await serverAction('start')}catch(e){alert(e.message)}}
@@ -234,5 +234,27 @@ function renderWizard(){const s=wizardState;const b=$('wizardBody');if(s.step===
 function pickTemplate(k){wizardState.template=k;const t={survival:['Paper',4096,2,20],creative:['Paper',3072,2,15],modded:['Fabric',6144,4,30],proxy:['Velocity',2048,1,5],vanilla:['Vanilla',3072,2,15]}[k];wizardState.software=t[0];wizardState.memory=t[1];wizardState.cpu=t[2];wizardState.disk=t[3];renderWizard()}
 function collectWizard(){if(wizardState.step===2){wizardState.name=$('wName').value;wizardState.software=$('wSoft').value;wizardState.version=$('wVer').value}if(wizardState.step===3){wizardState.memory=Number($('wRam').value);wizardState.cpu=Number($('wCpu').value);wizardState.disk=Number($('wDisk').value);wizardState.port=$('wPort').value==='auto'?'':Number($('wPort').value)}}function nextWizard(){collectWizard();wizardState.step++;renderWizard()}function prevWizard(){collectWizard();wizardState.step--;renderWizard()}
 async function createFromWizard(){if(!$('wEula').checked){alert('You must accept the EULA to create a Minecraft server.');return}try{const s={name:wizardState.name,template:wizardState.template,software:wizardState.software,version:wizardState.version,memory:wizardState.memory,cpu:wizardState.cpu,disk:wizardState.disk,port:wizardState.port||undefined,eulaAccepted:$('wEula').checked};const x=await api('/api/instances','POST',s);INSTANCE=x.id;localStorage.setItem('blockhost_instance',INSTANCE);closeWizard();await load()}catch(e){alert(e.message)}}
+
+async function refreshPublicAccess(){
+ try{
+ const data=await raw('/api/public-access/status');
+ $('cloudflareStatus').textContent=data.cloudflare.running?'Running':'Stopped';
+ $('cloudflareEmail').value=data.cloudflare.email||'';
+ $('cloudflareLink').textContent='';
+ if(data.cloudflare.url){
+ const a=document.createElement('a');a.href=data.cloudflare.url;a.textContent=data.cloudflare.url;a.target='_blank';a.rel='noopener';$('cloudflareLink').append(a);
+ const b=document.createElement('button');b.textContent='Use for invites';b.onclick=()=>{$('inviteBaseUrl').value=data.cloudflare.url;tab('friends')};$('cloudflareLink').append(b);
+ }
+ $('playitStatus').textContent=data.playit.running?'Agent running':'Agent stopped';
+ $('playitPort').value=data.playit.port;
+ $('playitAddress').value=data.playit.address;
+ }catch(e){$('cloudflareStatus').textContent=e.message}
+}
+async function startCloudflare(){try{await api('/api/public-access/cloudflare/start','POST',{email:$('cloudflareEmail').value});refreshPublicAccess()}catch(e){alert(e.message)}}
+async function stopCloudflare(){if(confirm('Stop dashboard tunnel?')){await api('/api/public-access/cloudflare/stop','POST',{});refreshPublicAccess()}}
+async function startPlayit(){try{await api('/api/public-access/playit/start','POST',{secret:$('playitSecret').value,port:Number($('playitPort').value)});$('playitSecret').value='';refreshPublicAccess()}catch(e){alert(e.message)}}
+async function stopPlayit(){if(confirm('Stop Minecraft tunnel?')){await api('/api/public-access/playit/stop','POST',{});refreshPublicAccess()}}
+async function savePlayitAddress(){try{await api('/api/public-access/playit/address','POST',{address:$('playitAddress').value});refreshPublicAccess()}catch(e){alert(e.message)}}
+
 function esc(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function escAttr(x){return esc(x).replace(/`/g,'&#96;')}function formatBytes(n){if(n<1024)return n+' B';let u=['KB','MB','GB','TB'],i=-1;do{n/=1024;i++}while(n>=1024&&i<u.length-1);return n.toFixed(1)+' '+u[i]}
 if(TOKEN)boot();
