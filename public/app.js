@@ -15,9 +15,47 @@ let dbTab='dashboard';function tab(id){if(dbTab==='console')stopConsolePolling()
 async function loadSetup(){const c=await raw('/api/installer/catalog');$('soft').innerHTML=c.software.map(x=>`<option>${x}</option>`).join('');$('ver').innerHTML=c.versions.map(x=>`<option>${x}</option>`).join('');const s=await raw('/api/status');$('soft').value=s.instance.software;$('ver').value=s.instance.version;$('templateInfo').textContent=templatesText(s.instance.template)}
 function templatesText(t){return ({survival:'Survival · Paper · 4GB · 2 CPU',creative:'Creative · Paper · 3GB · 2 CPU',modded:'Modded · Fabric · 6GB · 4 CPU',proxy:'Proxy · Velocity · 2GB · 1 CPU',vanilla:'Vanilla · Vanilla · 3GB · 2 CPU'})[t]||'Custom server'}
 async function applyInstall(){try{await api(`/api/instances/${INSTANCE}`,'PUT',{software:$('soft').value,version:$('ver').value,memory:Number($('installRam').value),cpu:Number($('installCpu').value)});await serverAction('start')}catch(e){alert(e.message)}}
-async function listFiles(p=''){const j=await raw('/api/files?path='+encodeURIComponent(p));$('fileList').innerHTML=(p?`<div class=file><a onclick="listFiles('')">← root</a></div>`:'')+j.map(x=>`<div class=file><a onclick="${x.type==='dir'?`listFiles('${escAttr(x.path)}')`:`openText('${escAttr(x.path)}')`}">${x.type==='dir'?'📁':'📄'} ${esc(x.name)}</a><span>${x.size?formatBytes(x.size):''}</span></div>`).join('')}
-async function openText(p){currentFile=p;$('filePath').value=p;const r=await fetch('/api/file?path='+encodeURIComponent(p),{headers:{Authorization:'Bearer '+TOKEN,'X-Instance-Id':INSTANCE}});$('editor').value=await r.text()}
-async function openFile(){openText($('filePath').value)}async function saveFile(){await api('/api/file','PUT',{path:currentFile||$('filePath').value,content:$('editor').value});alert('Saved')}async function newFolder(){const p=prompt('Folder path');if(p){await api('/api/folder','POST',{path:p});listFiles()}}async function uploadFile(){const f=$('fileUpload').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);fd.append('path','');await raw('/api/upload',{method:'POST',body:fd});listFiles()}
+let currentFolder='';
+const textFilePattern=/\.(properties|yml|yaml|json|toml|txt|log|conf|cfg|ini|xml|md|sh|bat|cmd|js|ts|java|html|css)$/i;
+async function listFiles(p=''){
+ currentFolder=p;
+ const area=$('fileList');area.textContent='Loading server files...';
+ try{
+  const files=await raw('/api/files?path='+encodeURIComponent(p));
+  area.innerHTML='<div class="muted">/data/'+esc(p)+(p?'/':'')+'</div>'+
+   (p?'<div class="file"><a href="#" onclick="listFiles('+JSON.stringify(p.split('/').slice(0,-1).join('/')).replaceAll('"','&quot;')+');return false">⬅ Parent folder</a></div>':'')+
+   (files.length?files.map(x=>'<div class="file"><a href="#" data-path="'+escAttr(x.path)+'" data-kind="'+x.type+'">'+(x.type==='dir'?'📁 ':'📄 ')+esc(x.name)+'</a><span>'+ (x.type==='file'?formatBytes(x.size):'Folder')+'</span></div>').join(''):'<p class="muted">This folder is empty.</p>');
+  area.querySelectorAll('a[data-path]').forEach(link=>link.addEventListener('click',e=>{e.preventDefault();const path=link.dataset.path;if(link.dataset.kind==='dir')listFiles(path);else openText(path)}));
+ }catch(e){area.textContent='Unable to list server files: '+e.message;}
+}
+async function openText(p){
+ currentFile=p;$('filePath').value=p;
+ if(!textFilePattern.test(p)){alert('This may be a binary file (such as a plugin .jar or Minecraft world data). Text editing is disabled for this file.');return;}
+ try{
+  const r=await fetch('/api/file?path='+encodeURIComponent(p),{headers:{Authorization:'Bearer '+TOKEN,'X-Instance-Id':INSTANCE}});
+  if(!r.ok)throw Error(await r.text());
+  $('editor').value=await r.text();
+ }catch(e){alert('Unable to open file: '+e.message);}
+}
+async function openFile(){openText($('filePath').value)}
+async function saveFile(){
+ const p=currentFile||$('filePath').value;
+ if(!p)return alert('Select a text file first.');
+ if(!textFilePattern.test(p))return alert('Only text configuration files can be edited.');
+ try{await api('/api/file','PUT',{path:p,content:$('editor').value});alert('Saved '+p+'. Restart Minecraft if required for changes to take effect.');listFiles(currentFolder)}
+ catch(e){alert('Unable to save file: '+e.message)}
+}
+async function newFolder(){
+ const name=prompt('New folder name inside '+(currentFolder||'/data'));
+ if(!name)return;
+ if(name.includes('/')||name.includes('\\')||name==='.'||name==='..')return alert('Enter a single folder name.');
+ try{await api('/api/folder','POST',{path:(currentFolder?currentFolder+'/':'')+name});listFiles(currentFolder)}catch(e){alert(e.message)}
+}
+async function uploadFile(){
+ const f=$('fileUpload').files[0];if(!f)return;
+ const fd=new FormData();fd.append('file',f);fd.append('path',currentFolder);
+ try{await raw('/api/upload',{method:'POST',body:fd});$('fileUpload').value='';listFiles(currentFolder)}catch(e){alert('Upload failed: '+e.message)}
+}
 let consolePollTimer=null,consoleFetching=false,consoleInstance='';
 async function refreshConsole(force=false){
  const output=$('consoleOutput');if(!output||consoleFetching||!INSTANCE)return;
