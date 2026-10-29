@@ -4,7 +4,7 @@ async function raw(url,opt={}){opt.headers={...(opt.headers||{}),...(TOKEN?{Auth
 async function api(url,method='GET',body){return raw(url,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined})}
 async function login(){try{const j=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('user').value,password:$('pass').value})}).then(x=>x.json());if(!j.token)throw Error(j.error);TOKEN=j.token;localStorage.setItem('blockhost_token',TOKEN);boot()}catch(e){$('authMsg').textContent=e.message}}
 async function register(){try{const j=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('user').value,password:$('pass').value})}).then(x=>x.json());if(!j.token)throw Error(j.error);TOKEN=j.token;localStorage.setItem('blockhost_token',TOKEN);boot()}catch(e){$('authMsg').textContent=e.message}}
-async function boot(){try{ME=await raw('/api/auth/me');$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('who').textContent=ME.username+' · '+ME.role;await load()}catch(e){console.error(e)}}
+async function boot(){try{ME=await raw('/api/auth/me');$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('who').textContent=ME.username+' · '+ME.role;await acceptPendingInvite();await load()}catch(e){console.error(e)}}
 function logout(){TOKEN='';localStorage.removeItem('blockhost_token');location.reload()}
 async function load(){await loadInstances();await refresh();await loadSetup();await loadBackups();await loadSchedules();await loadUsers();if(dbTab==='proxy')loadBackends()}
 async function loadInstances(){const xs=await raw('/api/instances');if(!xs.length)return;$('instanceSelect').innerHTML=xs.map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.type)}</option>`).join('');if(!xs.some(x=>x.id===INSTANCE))INSTANCE=xs[0].id;localStorage.setItem('blockhost_instance',INSTANCE);$('instanceSelect').value=INSTANCE}
@@ -187,7 +187,32 @@ async function loadSchedules(){try{const j=await raw('/api/schedules');$('schedu
 async function addSchedule(){await api('/api/schedules','POST',{instanceId:INSTANCE,type:$('scheduleType').value,intervalMinutes:Number($('scheduleMinutes').value)});loadSchedules()}async function deleteSchedule(id){await api('/api/schedules/'+id,'DELETE');loadSchedules()}
 let backends=[];async function loadBackends(){try{backends=await raw('/api/proxy/backends');renderBackends()}catch(e){$('backendList').innerHTML='<p class=muted>Switch to a Velocity or Waterfall instance to configure a proxy network.</p>'}}function renderBackends(){$('backendList').innerHTML=backends.map((b,i)=>`<div class=row><input value="${escAttr(b.name)}" onchange="backends[${i}].name=this.value"><select onchange="backends[${i}].instanceId=this.value">${instanceOptions(b.instanceId)}</select><button class=danger onclick="backends.splice(${i},1);renderBackends()">×</button></div>`).join('')}async function addBackend(){backends.push({name:'backend-'+(backends.length+1),instanceId:''});renderBackends()}async function saveBackends(){try{await api('/api/proxy/backends','PUT',{backends});alert('Proxy configuration saved. Restart the proxy to apply it.')}catch(e){alert(e.message)}}
 function instanceOptions(sel){const opts=[...$('instanceSelect').options].map(o=>`<option value="${o.value}" ${o.value===sel?'selected':''}>${o.text}</option>`).join('');return opts}
-async function invite(){const j=await api('/api/invites','POST',{hours:Number($('invHours').value),maxUses:Number($('invUses').value)});$('inviteOut').innerHTML=`<div class=card><b>Share this link</b><p>${location.origin+j.link}</p></div>`}
+async function invite(){
+ try{
+  const base=($('inviteBaseUrl').value||'').trim().replace(/\/$/,'');
+  const origin=base||location.origin;
+  const parsed=new URL(origin);
+  if(!/^https?:$/.test(parsed.protocol)||parsed.username||parsed.password||parsed.pathname!=='/'||parsed.search||parsed.hash)throw Error('Enter a valid dashboard address such as http://100.x.y.z:8080');
+  if(/^(localhost|127\\.0\\.0\\.1|\\[::1\\])$/i.test(parsed.hostname))throw Error('localhost cannot be used on another machine. Enter your Windows Tailscale IP.');
+  const j=await api('/api/invites','POST',{hours:Number($('invHours').value),maxUses:Number($('invUses').value)});
+  const link=origin+j.link;
+  $('inviteOut').innerHTML='<div class="card"><b>Share this BlockHost invitation</b><p class="muted">Your friend needs Tailscale access to this Windows PC before opening the link.</p><input id="generatedInvite" readonly><button id="copyGeneratedInvite">Copy invite link</button></div>';
+  $('generatedInvite').value=link;
+  $('copyGeneratedInvite').onclick=()=>navigator.clipboard.writeText(link).then(()=>alert('Invite copied')).catch(()=>prompt('Copy this link:',link));
+ }catch(e){alert('Unable to create invite: '+e.message)}
+}
+async function acceptPendingInvite(){
+ const match=location.pathname.match(/^\\/invite\\/([a-f0-9-]+)$/i);
+ const key=new URLSearchParams(location.search).get('key');
+ if(!match||!key||!TOKEN)return;
+ try{
+  const j=await api('/api/invites/'+encodeURIComponent(match[1])+'/accept','POST',{key});
+  INSTANCE=j.instance;localStorage.setItem('blockhost_instance',INSTANCE);
+  history.replaceState({},'', '/');
+  alert('Invitation accepted! You now have access to the shared Minecraft server.');
+ }catch(e){alert('Could not accept invitation: '+e.message)}
+}
+
 async function saveSettings(){try{await api(`/api/instances/${INSTANCE}`,'PUT',{name:$('setName').value,port:Number($('setPort').value),memory:Number($('setRam').value),cpu:Number($('setCpu').value),maxPlayers:Number($('setMax').value),gamemode:$('setMode').value});refresh()}catch(e){alert(e.message)}}
 async function loadUsers(){if(!ME||!['owner','admin'].includes(ME.role))return;try{const j=await raw('/api/users');$('users').innerHTML=j.map(u=>`<div class=file><span>${esc(u.username)} · ${u.role}</span><button onclick="grant('${u.id}')">Grant access</button></div>`).join('')}catch{}}async function grant(id){await api(`/api/instances/${INSTANCE}/access`,'POST',{userId:id,grant:true});alert('Access granted')}
 
