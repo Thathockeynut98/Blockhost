@@ -21,7 +21,7 @@ function Compose([string[]]$arguments) {
 try {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Fail "Docker Desktop is not installed or docker is not on PATH." }
     Say "Checking Docker engine..."
-    try { $null = DockerText @("info","--format","{{.ServerVersion}}") }
+    try { $null = DockerText -arguments @("info","--format","{{.ServerVersion}}") }
     catch { Fail "Docker engine is not available. Start Docker Desktop, wait for Engine running, and retry." }
     & docker compose version | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "Docker Compose plugin is unavailable." }
@@ -50,7 +50,7 @@ try {
     $containerRunning = $false
     $containerImage = ""
     try {
-        $existing = DockerText @("inspect","blockhost","--format","{{.State.Running}}|{{.Image}}")
+        $existing = DockerText -arguments @("inspect","blockhost","--format","{{.State.Running}}|{{.Image}}")
         $containerExists = $true
         $parts = $existing -split "\|",2
         $containerRunning = $parts[0] -eq "true"
@@ -58,7 +58,7 @@ try {
     } catch {}
     $imageAvailable = $false
     if ($containerImage) {
-        try { $null = DockerText @("image","inspect",$containerImage,"--format","{{.Id}}"); $imageAvailable = $true } catch {}
+        try { $null = DockerText -arguments @("image","inspect",$containerImage,"--format","{{.Id}}"); $imageAvailable = $true } catch {}
     }
     Say ("BlockHost container: " + $(if($containerExists){if($containerRunning){"running"}else{"stopped"}}else{"not found"}))
     $mc = @(& docker ps -a --format "{{.Names}}|{{.Image}}|{{.Status}}" 2>$null |
@@ -77,12 +77,12 @@ try {
     }
     if ($needsBuild) {
         Say "Source changed or image missing. Building BlockHost (Docker cache will be reused)..."
-        if ($PullBaseImages) { Compose @("build","--pull","blockhost") }
-        else { Compose @("build","blockhost") }
-        Compose @("up","-d","--no-build","blockhost")
+        if ($PullBaseImages) { Compose -arguments @("build","--pull","blockhost") }
+        else { Compose -arguments @("build","blockhost") }
+        Compose -arguments @("up","-d","--no-build","blockhost")
     } else {
         Say "Existing image is reusable. Starting/reconciling BlockHost without downloading or rebuilding..."
-        Compose @("up","-d","--no-build","blockhost")
+        Compose -arguments @("up","-d","--no-build","blockhost")
     }
     if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
     Set-Content -Path $hashFile -Value $fingerprint -Encoding ascii
