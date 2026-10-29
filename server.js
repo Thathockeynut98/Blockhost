@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import {fileURLToPath} from "node:url";
 import multer from "multer";
+import {publicAccessRouter} from "./public-access.js";
 import {groups,definitions,validateSettings,parseProperties,mergeProperties} from "./settings-schema.js";
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
@@ -476,6 +477,8 @@ app.post("/api/docker-import",auth,admin,async(req,res)=>{
   res.status(500).json({error:e.message});
  }
 });
+
+app.use("/api/public-access",publicAccessRouter({docker,auth,admin,db,save}));
 
 app.get("/invite/:id",(_,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 
