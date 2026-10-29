@@ -1,7 +1,7 @@
 # BlockHost Smart Start / Update (Windows PowerShell 5.1+)
 # Run from any folder: powershell -ExecutionPolicy Bypass -File .\Start-BlockHost.ps1
 [CmdletBinding()]
-param([switch]$ForceBuild,[switch]$NoBrowser,[switch]$PullBaseImages)
+param([switch]$ForceBuild,[switch]$NoBrowser,[switch]$PullBaseImages,[switch]$VerifyConsole)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $stateDir = Join-Path $PSScriptRoot ".blockhost-local"
@@ -79,13 +79,19 @@ try {
         Say "Source changed or image missing. Building BlockHost (Docker cache will be reused)..."
         if ($PullBaseImages) { Compose -arguments @("build","--pull","blockhost") }
         else { Compose -arguments @("build","blockhost") }
-        Compose -arguments @("up","-d","--no-build","blockhost")
+        Compose -arguments @("up","-d","--no-build","--force-recreate","--no-deps","blockhost")
     } else {
         Say "Existing image is reusable. Starting/reconciling BlockHost without downloading or rebuilding..."
         Compose -arguments @("up","-d","--no-build","blockhost")
     }
     if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
     Set-Content -Path $hashFile -Value $fingerprint -Encoding ascii
+    if ($VerifyConsole) {
+        Say "Checking console UI inside the running container..."
+        $html = DockerText -arguments @("exec","blockhost","cat","/app/public/index.html")
+        if ($html -notmatch 'consoleAutoScroll') { Warn "Console controls not found in running image. Confirm your source folder contains the latest public/index.html." }
+        else { Say "Updated console interface confirmed inside Docker." }
+    }
     Say "Dashboard: http://localhost:8080"
     Say "Existing Minecraft containers and Docker volumes have been preserved."
     & docker compose ps
