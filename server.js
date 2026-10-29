@@ -56,7 +56,7 @@ function volumeName(id){return `blockhost_${id.replace(/[^a-zA-Z0-9_-]/g,"_")}`}
 function containerName(id){return `blockhost-${id.replace(/[^a-zA-Z0-9_-]/g,"-")}`}
 function runtime(id){return db.instances[id]}
 function imageFor(x){return proxySoftware.has(x.software)?"itzg/mc-proxy:java21":"itzg/minecraft-server:java21"}
-function docker(args,{input}={}){return new Promise((resolve,reject)=>{const p=spawn("docker",args,{stdio:[input!==undefined?"pipe":"ignore","pipe","pipe"]});let out="",err="";p.stdout.on("data",d=>out+=d);p.stderr.on("data",d=>err+=d);if(input!==undefined){p.stdin.write(input);p.stdin.end()}p.on("close",c=>c===0?resolve(out.trim()):reject(new Error(err.trim()||`docker exited ${c}`)))});}
+function docker(args,{input}={}){return new Promise((resolve,reject)=>{const p=spawn("docker",args,{stdio:[input!==undefined?"pipe":"ignore","pipe","pipe"]});let out="",err="";p.stdout.on("data",d=>out+=d);p.stderr.on("data",d=>err+=d);if(input!==undefined){p.stdin.write(input);p.stdin.end()}p.on("close",c=>c===0?resolve((args[0]==="logs"?(out+err):out).trim()):reject(new Error(err.trim()||`docker exited ${c}`)))});}
 async function dockerJSON(args){return JSON.parse(await docker(args))}
 async function ensureNetwork(){try{await docker(["network","inspect",db.settings.network])}catch{await docker(["network","create",db.settings.network])}}
 async function volumeExists(v){try{await docker(["volume","inspect",v]);return true}catch{return false}}
