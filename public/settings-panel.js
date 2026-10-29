@@ -39,3 +39,12 @@ async function saveMinecraftSettings(){
  }catch(e){alert(e.message);}
 }
 window.addEventListener('beforeunload',e=>{if(settingsDirty){e.preventDefault();e.returnValue='';}});
+
+async function acceptExistingEula(){
+ if(!$('existingEula').checked){alert('Please read and explicitly accept the Minecraft EULA first.');return;}
+ if(!confirm('Recreate the Minecraft container with EULA=TRUE? The existing Docker data volume will be preserved.'))return;
+ try{
+  await api('/api/instances/'+encodeURIComponent(INSTANCE)+'/accept-eula','POST',{acceptEula:true});
+  $('existingEula').checked=false;alert('EULA saved. Minecraft container recreated. Check the Console for startup logs.');await refresh();
+ }catch(e){alert(e.message);}
+}
