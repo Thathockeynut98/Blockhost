@@ -24,9 +24,44 @@ async function listFiles(p=''){
   const files=await raw('/api/files?path='+encodeURIComponent(p));
   area.innerHTML='<div class="muted">/data/'+esc(p)+(p?'/':'')+'</div>'+
    (p?'<div class="file"><a href="#" onclick="listFiles('+JSON.stringify(p.split('/').slice(0,-1).join('/')).replaceAll('"','&quot;')+');return false">⬅ Parent folder</a></div>':'')+
-   (files.length?files.map(x=>'<div class="file"><a href="#" data-path="'+escAttr(x.path)+'" data-kind="'+x.type+'">'+(x.type==='dir'?'📁 ':'📄 ')+esc(x.name)+'</a><span>'+ (x.type==='file'?formatBytes(x.size):'Folder')+'</span></div>').join(''):'<p class="muted">This folder is empty.</p>');
+   (files.length?files.map(x=>'<div class="file"><a href="#" data-path="'+escAttr(x.path)+'" data-kind="'+x.type+'">'+(x.type==='dir'?'📁 ':'📄 ')+esc(x.name)+'</a><span>'+ (x.type==='file'?formatBytes(x.size):'Folder')+'</span><span class="row"><button class="ghost" data-action="download" data-path="'+escAttr(x.path)+'">Download</button><button class="ghost" data-action="rename" data-path="'+escAttr(x.path)+'">Rename</button><button class="danger" data-action="delete" data-path="'+escAttr(x.path)+'">Delete</button></span></div>').join(''):'<p class="muted">This folder is empty.</p>');
   area.querySelectorAll('a[data-path]').forEach(link=>link.addEventListener('click',e=>{e.preventDefault();const path=link.dataset.path;if(link.dataset.kind==='dir')listFiles(path);else openText(path)}));
+  area.querySelectorAll('button[data-action]').forEach(button=>button.addEventListener('click',async()=>{
+   const action=button.dataset.action,path=button.dataset.path;
+   if(action==='download')await downloadServerFile(path);
+   if(action==='rename')await renameServerFile(path);
+   if(action==='delete')await deleteServerFile(path);
+  }));
  }catch(e){area.textContent='Unable to list server files: '+e.message;}
+}
+
+async function downloadServerFile(path){
+ try{
+  const response=await fetch('/api/file/download?path='+encodeURIComponent(path),{headers:{Authorization:'Bearer '+TOKEN,'X-Instance-Id':INSTANCE}});
+  if(!response.ok)throw Error(await response.text());
+  const blob=await response.blob(),url=URL.createObjectURL(blob);
+  const disposition=response.headers.get('content-disposition')||'';
+  const match=disposition.match(/filename="([^"]+)"/);
+  const name=match?match[1]:path.split('/').pop();
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+ }catch(e){alert('Download failed: '+e.message)}
+}
+async function renameServerFile(path){
+ const oldName=path.split('/').pop();
+ const newName=prompt('Rename '+path+' to:',oldName);
+ if(newName===null||newName===oldName)return;
+ if(!newName||newName==='.'||newName==='..'||/[\\/]/.test(newName))return alert('Enter a valid name without slashes.');
+ if(!confirm('Rename '+path+' to '+newName+'?'))return;
+ try{await api('/api/file/rename','POST',{path,newName});if(currentFile===path){currentFile='';$('filePath').value='';$('editor').value='';}await listFiles(currentFolder)}
+ catch(e){alert('Rename failed: '+e.message)}
+}
+async function deleteServerFile(path){
+ if(!confirm('Permanently delete '+path+'? If this is a folder, EVERYTHING inside it will be deleted. This cannot be undone.'))return;
+ const typed=prompt('To confirm permanent deletion, type the full path exactly:\\n'+path);
+ if(typed!==path)return alert('Deletion cancelled: confirmation did not match.');
+ try{await api('/api/file','DELETE',{path,confirm:path});if(currentFile===path||currentFile.startsWith(path+'/')){currentFile='';$('filePath').value='';$('editor').value='';}await listFiles(currentFolder)}
+ catch(e){alert('Delete failed: '+e.message)}
 }
 async function openText(p){
  currentFile=p;$('filePath').value=p;
