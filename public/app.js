@@ -202,7 +202,7 @@ async function invite(){
  }catch(e){alert('Unable to create invite: '+e.message)}
 }
 async function acceptPendingInvite(){
- const match=location.pathname.match(/^\\/invite\\/([a-f0-9-]+)$/i);
+ const match=location.pathname.match(new RegExp('^/invite/([a-f0-9-]+)$','i'));
  const key=new URLSearchParams(location.search).get('key');
  if(!match||!key||!TOKEN)return;
  try{
