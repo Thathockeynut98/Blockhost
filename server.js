@@ -135,9 +135,9 @@ function vpath(x,p){const s=String(p||"").replaceAll("\\","/").replace(/^\/+/,""
 /* File manager: operate on the same persistent Docker volume mounted by Minecraft.
    All paths are relative to /data (or /server for proxy instances). */
 function fileRelative(value,{allowRoot=false}={}){
- const p=String(value??"").replaceAll("\\","/").replace(/^\\/+|\\/+$/g,"");
+ const p=String(value??"").replaceAll("\\","/").replace(/^\/+|\/+$/g,"");
  if(!p&&allowRoot)return "";
- if(!p||p.length>1024||p.split("/").some(x=>!x||x==="."||x===".."||/[\\x00-\\x1f]/.test(x)))throw new Error("Invalid file path");
+ if(!p||p.length>1024||p.split("/").some(x=>!x||x==="."||x===".."||/[\x00-\x1f]/.test(x)))throw new Error("Invalid file path");
  return p;
 }
 function shellArg(s){return "'"+String(s).replaceAll("'","'\\''")+"'";}
@@ -148,8 +148,8 @@ app.get("/api/files",auth,instanceAuth,async(req,res)=>{
   const base=vroot(req.instance),target=base+(rel?"/"+rel:"");
   const command="cd "+shellArg(target)+" && find . -mindepth 1 -maxdepth 1 -exec stat -c '%F|%s|%n' {} \\;";
   const out=await volumeCmd(req.instance,command);
-  const rows=out.split(/\\r?\\n/).filter(Boolean).map(line=>{
-   const m=line.match(/^([^|]+)\\|(\\d+)\\|\\.\\/(.*)$/);
+  const rows=out.split(/\r?\n/).filter(Boolean).map(line=>{
+   const m=line.match(/^([^|]+)\|(\d+)\|\.\x2f(.*)$/);
    if(!m)return null;
    const name=m[3],type=m[1].includes("directory")?"dir":m[1].includes("regular file")?"file":"other";
    return {name,type,size:Number(m[2]),path:rel?rel+"/"+name:name};
