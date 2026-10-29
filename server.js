@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import {fileURLToPath} from "node:url";
 import multer from "multer";
+import {groups,definitions,validateSettings,parseProperties,mergeProperties} from "./settings-schema.js";
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const app=express();
@@ -64,7 +65,7 @@ async function statusOf(x){const c=await containerInspect(x);if(!c)return "stopp
 async function updateStatus(x){x.status=await statusOf(x);x.updatedAt=now();return x.status}
 async function allocPort(requested){const used=new Set(Object.values(db.instances).map(x=>x.port));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25565,Number(db.settings.nextPort)||25565);while(used.has(p))p++;db.settings.nextPort=p+1;return p}
 async function allocRcon(requested){const used=new Set(Object.values(db.instances).map(x=>x.rconPort));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25575,Number(db.settings.nextRconPort)||25575);while(used.has(p))p++;db.settings.nextRconPort=p+1;return p}
-function envArgs(x){const e=["--env",`EULA=${x.eulaAccepted===false?"FALSE":"TRUE"}`,"--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{if(x.imported&&x.jar){e.push("--env","TYPE=CUSTOM","--env",`CUSTOM_SERVER=/data/${x.jar.replaceAll("'","'")}`)}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`);}e.push("--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);if(x.maxPlayers)e.push("--env",`MAX_PLAYERS=${x.maxPlayers}`);if(x.gamemode)e.push("--env",`MODE=${x.gamemode}`)}return e}
+function envArgs(x){const e=["--env",`EULA=${x.eulaAccepted===true?"TRUE":"FALSE"}`,"--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{if(x.imported&&x.jar){e.push("--env","TYPE=CUSTOM","--env",`CUSTOM_SERVER=/data/${x.jar.replaceAll("'","'")}`)}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`);}e.push("--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);if(x.maxPlayers)e.push("--env",`MAX_PLAYERS=${x.maxPlayers}`);if(x.gamemode)e.push("--env",`MODE=${x.gamemode}`)}return e}
 async function runContainer(x){await ensureNetwork();await ensureVolume(x);const old=await containerInspect(x);if(old)await docker(["rm","-f",containerName(x.id)]).catch(()=>{});
   const args=["run","-d","--name",containerName(x.id),"--network",db.settings.network,"--restart","unless-stopped","--cpus",String(x.cpu),"--memory",`${x.memory}m`,`--memory-swap`,`${x.memory}m`,`-p`,`${x.port}:${x.software==="Waterfall"?25577:25565}/tcp`];
   if(!proxySoftware.has(x.software))args.push("-p",`${x.rconPort}:25575/tcp`);
@@ -94,7 +95,7 @@ app.post("/api/auth/logout",auth,(req,res)=>{delete db.sessions[req.token];save(
 app.get("/api/templates",auth,(_,res)=>res.json(templates));
 app.get("/api/instances",auth,async(req,res)=>{const out=[];for(const x of Object.values(db.instances))if(canAccess(req.user,x)){await updateStatus(x);out.push({...x,permissions:undefined})}save();res.json(out)});
 app.get("/api/instances/:id",auth,(req,res)=>{const x=db.instances[req.params.id];if(!x||!canAccess(req.user,x))return res.status(404).json({error:"Not found"});res.json(x)});
-app.post("/api/instances",auth,admin,async(req,res)=>{const t=templates[req.body.template]||templates.survival;const id=idify(req.body.id||req.body.name);if(db.instances[id])return res.status(409).json({error:"That server ID already exists"});const port=await allocPort(req.body.port);const rconPort=await allocRcon(req.body.rconPort);const x={id,name:req.body.name||t.name,template:req.body.template||"survival",type:req.body.type||t.type,software:req.body.software||t.software,version:req.body.version||"1.21.10",port,rconPort,memory:safeNum(req.body.memory,t.memory,512,65536),cpu:safeNum(req.body.cpu,t.cpu,0.25,32),disk:safeNum(req.body.disk,t.disk,1,1000),maxPlayers:safeNum(req.body.maxPlayers,20,1,5000),gamemode:req.body.gamemode||"survival",permissions:[],eulaAccepted:false,autoStart:!!req.body.autoStart,status:"stopped",container:null,rconPassword:crypto.randomBytes(18).toString("hex"),createdAt:now(),updatedAt:now()};db.instances[id]=x;save();if(req.body.install!==false){try{await runContainer(x)}catch(e){x.status="error";x.lastError=e.message;save();return res.status(500).json({error:`Created server but container failed: ${e.message}`,instance:x})}}res.json(x)});
+app.post("/api/instances",auth,admin,async(req,res)=>{if(req.body.eulaAccepted!==true)return res.status(400).json({error:"You must explicitly accept the Minecraft EULA to create a server"});const t=templates[req.body.template]||templates.survival;const id=idify(req.body.id||req.body.name);if(db.instances[id])return res.status(409).json({error:"That server ID already exists"});const port=await allocPort(req.body.port);const rconPort=await allocRcon(req.body.rconPort);const x={id,name:req.body.name||t.name,template:req.body.template||"survival",type:req.body.type||t.type,software:req.body.software||t.software,version:req.body.version||"1.21.10",port,rconPort,memory:safeNum(req.body.memory,t.memory,512,65536),cpu:safeNum(req.body.cpu,t.cpu,0.25,32),disk:safeNum(req.body.disk,t.disk,1,1000),maxPlayers:safeNum(req.body.maxPlayers,20,1,5000),gamemode:req.body.gamemode||"survival",permissions:[],eulaAccepted:req.body.eulaAccepted===true,autoStart:!!req.body.autoStart,status:"stopped",container:null,rconPassword:crypto.randomBytes(18).toString("hex"),createdAt:now(),updatedAt:now()};db.instances[id]=x;save();if(req.body.install!==false){try{await runContainer(x)}catch(e){x.status="error";x.lastError=e.message;save();return res.status(500).json({error:`Created server but container failed: ${e.message}`,instance:x})}}res.json(x)});
 app.put("/api/instances/:id",auth,admin,async(req,res)=>{const x=db.instances[req.params.id];if(!x)return res.status(404).end();if(["port","memory","cpu","software","version"].some(k=>req.body[k]!==undefined)&&await statusOf(x)==="running")return res.status(409).json({error:"Stop the server before changing software, version, port, CPU, or RAM"});if(req.body.port!==undefined&&Object.values(db.instances).some(y=>y.id!==x.id&&y.port===Number(req.body.port)))return res.status(409).json({error:"Port already allocated"});for(const k of ["name","type","software","version","maxPlayers","gamemode","autoStart"])if(req.body[k]!==undefined)x[k]=req.body[k];for(const k of ["memory","cpu","disk","port","rconPort"])if(req.body[k]!==undefined)x[k]=Number(req.body[k]);x.updatedAt=now();save();res.json(x)});
 app.delete("/api/instances/:id",auth,admin,async(req,res)=>{const x=db.instances[req.params.id];if(!x)return res.status(404).end();await removeContainer(x);try{await docker(["volume","rm",volumeName(x.id)])}catch{}delete db.instances[x.id];db.schedules=db.schedules.filter(s=>s.instanceId!==x.id);save();res.json({ok:true})});
 app.post("/api/instances/:id/access",auth,admin,(req,res)=>{const x=db.instances[req.params.id];if(!x)return res.status(404).end();const uid=String(req.body.userId||"");x.permissions??=[];x.permissions=x.permissions.filter(p=>p.userId!==uid);if(req.body.grant)x.permissions.push({userId:uid,permissions:req.body.permissions||["view","console","start_stop","files","players","backups","mods"]});save();res.json(x.permissions)});
@@ -236,6 +237,34 @@ app.put("/api/proxy/backends",auth,instanceAuth,async(req,res)=>{if(!proxySoftwa
   if(req.instance.software==="Velocity"){const rootText=`config-version = "2.7"\nbind = "0.0.0.0:${req.instance.port}"\nmotd = "BlockHost Network"\nshow-max-players = 500\nonline-mode = true\nplayer-info-forwarding-mode = "modern"\nforwarding-secret-file = "forwarding.secret"\nping-passthrough = "DESCRIPTION"\n\n[servers]\n${req.instance.backends.map(b=>`${b.name} = "${containerName(b.instanceId)}:25565"`).join("\n")}\ntry = [${req.instance.backends.map(b=>`"${b.name}"`).join(", ")}]\n`;
     const encoded=Buffer.from(rootText).toString("base64");await volumeCmd(req.instance,`echo '${encoded}' | base64 -d > /data/velocity.toml; echo '${crypto.randomBytes(24).toString("hex")}' > /data/forwarding.secret`)}
   save();res.json(req.instance.backends)});
+
+
+const mcPropertiesPath="/data/server.properties";
+app.get("/api/instances/:id/minecraft-settings",auth,async(req,res)=>{
+ const x=db.instances[req.params.id];if(!x||!canAccess(req.user,x))return res.status(404).json({error:"Server not found"});
+ if(proxySoftware.has(x.software))return res.status(400).json({error:"Proxy servers do not use server.properties"});
+ try{
+  const raw=await volumeCmd(x,"test -f /data/server.properties && cat /data/server.properties || true");
+  const current=parseProperties(raw),values={};
+  for(const [key,d] of Object.entries(definitions))values[key]=current[key]??String(d.defaultValue);
+  res.json({groups: Object.fromEntries(Object.entries(groups).map(([name,defs])=>[name,defs.map(([key])=>definitions[key])])),values,exists:raw.length>0});
+ }catch(e){res.status(500).json({error:e.message})}
+});
+app.put("/api/instances/:id/minecraft-settings",auth,admin,async(req,res)=>{
+ const x=db.instances[req.params.id];if(!x)return res.status(404).json({error:"Server not found"});
+ if(proxySoftware.has(x.software))return res.status(400).json({error:"Proxy servers do not use server.properties"});
+ if(await statusOf(x)==="running"||await statusOf(x)==="restarting")return res.status(409).json({error:"Stop the Minecraft server before editing server.properties"});
+ try{
+  const updates=validateSettings(req.body.settings);
+  const original=await volumeCmd(x,"test -f /data/server.properties && cat /data/server.properties || true");
+  const merged=mergeProperties(original,updates);
+  await volumeCmd(x,"cat > /data/server.properties",merged);
+  if(updates["gamemode"]!==undefined)x.gamemode=updates["gamemode"];
+  if(updates["max-players"]!==undefined)x.maxPlayers=Number(updates["max-players"]);
+  x.updatedAt=now();save();
+  res.json({ok:true,restartRequired:true});
+ }catch(e){res.status(/Invalid|Unsupported|out of range|must be/.test(e.message)?400:500).json({error:e.message})}
+});
 
 app.get("/invite/:id",(_,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 
