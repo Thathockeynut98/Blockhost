@@ -48,3 +48,23 @@ async function acceptExistingEula(){
   $('existingEula').checked=false;alert('EULA saved. Minecraft container recreated. Check the Console for startup logs.');await refresh();
  }catch(e){alert(e.message);}
 }
+
+async function loadDockerCandidates(){
+ const root=$('dockerCandidates');root.textContent='Searching Docker containers…';
+ try{
+  const items=await api('/api/docker-import/candidates');
+  if(!items.length){root.textContent='No supported Minecraft Docker containers found.';return;}
+  root.innerHTML=items.map(c=>'<div class="card"><b>'+esc(c.name)+'</b> · '+esc(c.state)+'<p>'+esc(c.image)+'</p><p>Data volume: '+esc(c.volume||'Unsupported mount')+'</p><button '+(c.eligible?'':'disabled')+' onclick="importDockerContainer(\''+c.id+'\')">Copy into BlockHost</button>'+(c.eligible?'':'<p>Source must be stopped and use a named volume at /data.</p>')+'</div>').join('');
+ }catch(e){root.textContent='Docker discovery failed: '+e.message;}
+}
+async function importDockerContainer(containerId){
+ const name=prompt('Name for the imported BlockHost server:');
+ if(!name||!name.trim())return;
+ if(!confirm('Have you read and accepted the Minecraft EULA for this imported server? The source container must be stopped. A COPY of its data will be created; the original remains unchanged.'))return;
+ try{
+  const r=await api('/api/docker-import','POST',{containerId,name:name.trim(),confirmCopy:true,eulaAccepted:true});
+  INSTANCE=r.instance.id;localStorage.setItem('blockhost_instance',INSTANCE);
+  await loadInstances();await refresh();await loadMinecraftSettings();
+  alert('Imported successfully! Review settings, then start the imported server from BlockHost. Original Docker container was preserved.');
+ }catch(e){alert('Import failed: '+e.message);}
+}
