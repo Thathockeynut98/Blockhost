@@ -13,15 +13,38 @@ const app=express();
 app.use(express.json({limit:"8mb"}));
 app.use(express.static(path.join(__dirname,"public")));
 const PORT=Number(process.env.PORT||8080), MC_PORT=Number(process.env.MC_PORT||25565);
-const DATA=path.join(__dirname,"data"), ROOT=path.join(__dirname,"servers","main"), BACKUPS=path.join(ROOT,"backups");
-for(const p of [DATA,ROOT,BACKUPS,path.join(ROOT,"mods"),path.join(ROOT,"plugins")])fs.mkdirSync(p,{recursive:true});
+const DATA=path.join(__dirname,"data"), SERVERS=path.join(__dirname,"servers");
+fs.mkdirSync(DATA,{recursive:true}); fs.mkdirSync(SERVERS,{recursive:true});
+function instanceRoot(id){return path.join(SERVERS,String(id).replace(/[^a-zA-Z0-9_-]/g,"_"))}
+function ensureInstance(id){const r=instanceRoot(id);for(const p of [r,path.join(r,"backups"),path.join(r,"mods"),path.join(r,"plugins")])fs.mkdirSync(p,{recursive:true});return r}
+let ROOT=ensureInstance("main"), BACKUPS=path.join(ROOT,"backups");
 const DBFILE=path.join(DATA,"state.json");
 let db=fs.existsSync(DBFILE)?JSON.parse(fs.readFileSync(DBFILE,"utf8")):{
-  users:[],sessions:{},invites:{},
-  settings:{name:"My Survival World",version:"Unknown",software:"Unknown",maxPlayers:20,autoRestart:false,restartMinutes:0,backupEnabled:false,backupMinutes:60},
-  players:{},activity:[],bans:[],whitelist:[],backups:[],installedAddons:[]
+  users:[],sessions:{},invites:{},instances:{
+    main:{id:"main",name:"Survival",type:"Survival",software:"Paper",version:"1.21.10",port:25565,rconPort:25575,memory:4096,permissions:[]}
+  }
 };
+if(!db.instances)db.instances={main:{id:"main",name:"Survival",type:"Survival",software:"Paper",version:"1.21.10",port:25565,rconPort:25575,memory:4096,permissions:[]}};
+db.users??=[];db.sessions??={};db.invites??={};
 function save(){fs.writeFileSync(DBFILE,JSON.stringify(db,null,2))}
+let activeInstance="main";
+function useInstance(id){
+  if(!db.instances[id])throw new Error("Unknown server instance");
+  activeInstance=id; ROOT=ensureInstance(id); BACKUPS=path.join(ROOT,"backups");
+  return db.instances[id];
+}
+function currentInstance(){return db.instances[activeInstance]}
+function canAccess(user,id=activeInstance){
+  const x=db.instances[id]; if(!x)return false;
+  return user.role==="owner"||user.role==="admin"||x.permissions.includes(user.id);
+}
+function instanceMiddleware(req,res,next){
+  const id=String(req.headers["x-instance-id"]||req.query.instance||req.body?.instance||"main");
+  if(!db.instances[id])return res.status(404).json({error:"Unknown server instance"});
+  if(!canAccess(req.user,id))return res.status(403).json({error:"No access to this server"});
+  try{useInstance(id)}catch(e){return res.status(500).json({error:e.message})}
+  req.instance=db.instances[id]; next();
+}
 const sha256=x=>crypto.createHash("sha256").update(x).digest("hex");
 function hashPassword(p,salt=crypto.randomBytes(16).toString("hex")){return {salt,hash:crypto.scryptSync(p,salt,64).toString("hex")}}
 function verifyPassword(p,u){return crypto.timingSafeEqual(Buffer.from(hashPassword(p,u.salt).hash,"hex"),Buffer.from(u.hash,"hex"))}
@@ -116,45 +139,77 @@ app.post("/api/invites",auth,(req,res)=>{const id=token().slice(0,10),secret=tok
 app.get("/api/invites/:id", (req,res)=>{const i=db.invites[req.params.id];if(!i||i.expiresAt<Date.now()||i.uses>=i.maxUses)return res.status(404).json({error:"Invite expired or exhausted"});res.json({id:i.id,expiresAt:i.expiresAt,remaining:i.maxUses-i.uses})});
 app.post("/api/invites/:id/accept",auth,(req,res)=>{const i=db.invites[req.params.id];if(!i||i.expiresAt<Date.now()||i.uses>=i.maxUses||req.body.key!==i.secret)return res.status(400).json({error:"Invalid invite"});i.uses++;save();res.json({ok:true,server:"main"})});
 
-app.get("/api/status",auth,(req,res)=>res.json({running:!!mc,players,metrics,settings:db.settings,port:MC_PORT,detectedVersion:detectVersion()}));
-app.get("/api/console",auth,(req,res)=>res.json(consoleLines));
-app.post("/api/start",auth,(req,res)=>res.json({ok:start()}));app.post("/api/stop",auth,(req,res)=>res.json({ok:stop()}));app.post("/api/kill",auth,(req,res)=>res.json({ok:kill()}));app.post("/api/restart",auth,(req,res)=>{if(mc)stop();setTimeout(start,3000);res.json({ok:true})});app.post("/api/command",auth,(req,res)=>{command(req.body.command||"");res.json({ok:true})});
 
-app.get("/api/files",auth,(req,res)=>{const p=safe(req.query.path||"");if(!p||!fs.existsSync(p)||!fs.statSync(p).isDirectory())return res.status(404).end();res.json(fs.readdirSync(p,{withFileTypes:true}).filter(x=>x.name!=="backups").map(x=>({name:x.name,path:path.relative(ROOT,path.join(p,x.name)).replaceAll("\\","/"),type:x.isDirectory()?"dir":"file",size:x.isDirectory()?0:bytes(path.join(p,x.name))})))});
-app.get("/api/file",auth,(req,res)=>{const p=safe(req.query.path);if(!p||!fs.existsSync(p)||fs.statSync(p).isDirectory())return res.status(404).end();res.type("text/plain").send(fs.readFileSync(p))});
-app.put("/api/file",auth,(req,res)=>{const p=safe(req.body.path);if(!p)return res.status(400).end();fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,String(req.body.content??""));res.json({ok:true})});
-app.post("/api/folder",auth,(req,res)=>{const p=safe(req.body.path);if(!p)return res.status(400).end();fs.mkdirSync(p,{recursive:true});res.json({ok:true})});
-app.post("/api/rename",auth,(req,res)=>{const a=safe(req.body.from),b=safe(req.body.to);if(!a||!b||a===ROOT||b===ROOT)return res.status(400).end();fs.renameSync(a,b);res.json({ok:true})});
-app.delete("/api/file",auth,(req,res)=>{const p=safe(req.query.path);if(!p||p===ROOT)return res.status(400).end();fs.rmSync(p,{recursive:true,force:true});res.json({ok:true})});
+app.get("/api/instances",auth,(req,res)=>{
+  res.json(Object.values(db.instances).map(x=>({...x,running:activeInstance===x.id&&!!mc,players:activeInstance===x.id?players.length:0})))
+});
+app.post("/api/instances",auth,ownerOrAdmin,(req,res)=>{
+  const id=String(req.body.id||req.body.name||"").toLowerCase().replace(/[^a-z0-9_-]/g,"-").replace(/^-+|-+$/g,"").slice(0,32);
+  if(!id||db.instances[id])return res.status(400).json({error:"Choose a unique valid instance name"});
+  const port=Number(req.body.port||25565);
+  if(Object.values(db.instances).some(x=>x.port===port))return res.status(409).json({error:"Port already assigned"});
+  db.instances[id]={id,name:req.body.name||id,type:req.body.type||"Survival",software:req.body.software||"Paper",version:req.body.version||"1.21.10",port,rconPort:Number(req.body.rconPort||port+10),memory:Number(req.body.memory||4096),permissions:[]};
+  ensureInstance(id);save();res.json(db.instances[id]);
+});
+app.get("/api/instances/:id",auth,(req,res)=>{
+  const x=db.instances[req.params.id];if(!x)return res.status(404).end();if(!canAccess(req.user,req.params.id))return res.status(403).end();res.json(x)
+});
+app.put("/api/instances/:id",auth,ownerOrAdmin,(req,res)=>{
+  const x=db.instances[req.params.id];if(!x)return res.status(404).end();if(mc&&activeInstance===x.id)return res.status(409).json({error:"Stop the instance first"});
+  if(req.body.port&&Object.values(db.instances).some(y=>y.id!==x.id&&y.port===Number(req.body.port)))return res.status(409).json({error:"Port already assigned"});
+  Object.assign(x,{name:req.body.name??x.name,type:req.body.type??x.type,software:req.body.software??x.software,version:req.body.version??x.version,port:Number(req.body.port||x.port),rconPort:Number(req.body.rconPort||x.rconPort),memory:Number(req.body.memory||x.memory)});
+  ensureInstance(x.id);save();res.json(x)
+});
+app.delete("/api/instances/:id",auth,ownerOrAdmin,(req,res)=>{
+  if(req.params.id==="main")return res.status(400).json({error:"The main instance cannot be deleted"});
+  if(activeInstance===req.params.id&&mc)return res.status(409).json({error:"Stop the instance first"});
+  delete db.instances[req.params.id];save();res.json({ok:true})
+});
+app.post("/api/instances/:id/access",auth,ownerOrAdmin,(req,res)=>{
+  const x=db.instances[req.params.id];if(!x)return res.status(404).end();
+  if(req.body.grant&&!x.permissions.includes(req.body.userId))x.permissions.push(req.body.userId);
+  if(req.body.revoke)x.permissions=x.permissions.filter(id=>id!==req.body.userId);
+  save();res.json(x.permissions)
+});
+app.get("/api/status",auth,instanceMiddleware,(req,res)=>res.json({running:!!mc,players,metrics,settings:{...db.settings,...currentInstance()},port:currentInstance().port,detectedVersion:detectVersion(),instance:currentInstance()}));
+app.get("/api/console",auth,instanceMiddleware,(req,res)=>res.json(consoleLines));
+app.post("/api/start",auth,instanceMiddleware,(req,res)=>res.json({ok:start()}));app.post("/api/stop",auth,instanceMiddleware,(req,res)=>res.json({ok:stop()}));app.post("/api/kill",auth,instanceMiddleware,(req,res)=>res.json({ok:kill()}));app.post("/api/restart",auth,instanceMiddleware,(req,res)=>{if(mc)stop();setTimeout(start,3000);res.json({ok:true})});app.post("/api/command",auth,instanceMiddleware,(req,res)=>{command(req.body.command||"");res.json({ok:true})});
+
+app.get("/api/files",auth,instanceMiddleware,(req,res)=>{const p=safe(req.query.path||"");if(!p||!fs.existsSync(p)||!fs.statSync(p).isDirectory())return res.status(404).end();res.json(fs.readdirSync(p,{withFileTypes:true}).filter(x=>x.name!=="backups").map(x=>({name:x.name,path:path.relative(ROOT,path.join(p,x.name)).replaceAll("\\","/"),type:x.isDirectory()?"dir":"file",size:x.isDirectory()?0:bytes(path.join(p,x.name))})))});
+app.get("/api/file",auth,instanceMiddleware,(req,res)=>{const p=safe(req.query.path);if(!p||!fs.existsSync(p)||fs.statSync(p).isDirectory())return res.status(404).end();res.type("text/plain").send(fs.readFileSync(p))});
+app.put("/api/file",auth,instanceMiddleware,(req,res)=>{const p=safe(req.body.path);if(!p)return res.status(400).end();fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,String(req.body.content??""));res.json({ok:true})});
+app.post("/api/folder",auth,instanceMiddleware,(req,res)=>{const p=safe(req.body.path);if(!p)return res.status(400).end();fs.mkdirSync(p,{recursive:true});res.json({ok:true})});
+app.post("/api/rename",auth,instanceMiddleware,(req,res)=>{const a=safe(req.body.from),b=safe(req.body.to);if(!a||!b||a===ROOT||b===ROOT)return res.status(400).end();fs.renameSync(a,b);res.json({ok:true})});
+app.delete("/api/file",auth,instanceMiddleware,(req,res)=>{const p=safe(req.query.path);if(!p||p===ROOT)return res.status(400).end();fs.rmSync(p,{recursive:true,force:true});res.json({ok:true})});
 const upload=multer({dest:path.join(DATA,"uploads")});fs.mkdirSync(path.join(DATA,"uploads"),{recursive:true});
-app.post("/api/upload",auth,upload.single("file"),(req,res)=>{const dir=safe(req.body.path||"");if(!dir||!req.file)return res.status(400).end();fs.renameSync(req.file.path,path.join(dir,path.basename(req.file.originalname)));res.json({ok:true})});
-app.get("/api/download",auth,(req,res)=>{const p=safe(req.query.path);if(!p||!fs.existsSync(p)||fs.statSync(p).isDirectory())return res.status(404).end();res.download(p,path.basename(p))});
+app.post("/api/upload",auth,instanceMiddleware,upload.single("file"),(req,res)=>{const dir=safe(req.body.path||"");if(!dir||!req.file)return res.status(400).end();fs.renameSync(req.file.path,path.join(dir,path.basename(req.file.originalname)));res.json({ok:true})});
+app.get("/api/download",auth,instanceMiddleware,(req,res)=>{const p=safe(req.query.path);if(!p||!fs.existsSync(p)||fs.statSync(p).isDirectory())return res.status(404).end();res.download(p,path.basename(p))});
 
-app.get("/api/players",auth,(req,res)=>res.json({players,known:Object.entries(db.players).map(([name,v])=>({name,...v})),bans:db.bans,whitelist:db.whitelist,activity:db.activity.slice(-100).reverse()}));
-app.post("/api/player/action",auth,(req,res)=>{const {name,action}=req.body;if(!name)return res.status(400).end();const allowed=["op","deop","kick","ban","pardon","whitelist","whitelist_remove"];if(!allowed.includes(action))return res.status(400).end();command(`${action==="pardon"?"pardon":action==="whitelist_remove"?"whitelist remove":action} ${name}`);db.activity.push({time:Date.now(),name,action});save();res.json({ok:true})});
-app.get("/api/backups",auth,(req,res)=>res.json(db.backups));
-app.post("/api/backup",auth,async(req,res)=>{const id=new Date().toISOString().replaceAll(":","-"),dest=path.join(BACKUPS,id+".tar");const cp=spawn("tar",["-cf",dest,"--exclude=backups","-C",ROOT,"."]);cp.on("close",c=>{if(c){return res.status(500).json({error:"Backup failed"})}const b={id,file:id+".tar",size:bytes(dest),time:Date.now()};db.backups.push(b);save();res.json({ok:true,backup:b})})});
-app.get("/api/backup/download",auth,(req,res)=>{const b=db.backups.find(x=>x.id===req.query.id);if(!b)return res.status(404).end();res.download(path.join(BACKUPS,b.file),b.file)});
-app.delete("/api/backup",auth,(req,res)=>{const b=db.backups.find(x=>x.id===req.query.id);if(!b)return res.status(404).end();fs.rmSync(path.join(BACKUPS,b.file),{force:true});db.backups=db.backups.filter(x=>x.id!==b.id);save();res.json({ok:true})});
-app.post("/api/backup/restore",auth,(req,res)=>{const b=db.backups.find(x=>x.id===req.body.id);if(!b)return res.status(404).end();if(mc)return res.status(409).json({error:"Stop server first"});const cp=spawn("tar",["-xf",path.join(BACKUPS,b.file),"-C",ROOT]);cp.on("close",c=>res.json({ok:c===0}))});
+app.get("/api/players",auth,instanceMiddleware,(req,res)=>res.json({players,known:Object.entries(db.players).map(([name,v])=>({name,...v})),bans:db.bans,whitelist:db.whitelist,activity:db.activity.slice(-100).reverse()}));
+app.post("/api/player/action",auth,instanceMiddleware,(req,res)=>{const {name,action}=req.body;if(!name)return res.status(400).end();const allowed=["op","deop","kick","ban","pardon","whitelist","whitelist_remove"];if(!allowed.includes(action))return res.status(400).end();command(`${action==="pardon"?"pardon":action==="whitelist_remove"?"whitelist remove":action} ${name}`);db.activity.push({time:Date.now(),name,action});save();res.json({ok:true})});
+app.get("/api/backups",auth,instanceMiddleware,(req,res)=>res.json(db.backups));
+app.post("/api/backup",auth,instanceMiddleware,async(req,res)=>{const id=new Date().toISOString().replaceAll(":","-"),dest=path.join(BACKUPS,id+".tar");const cp=spawn("tar",["-cf",dest,"--exclude=backups","-C",ROOT,"."]);cp.on("close",c=>{if(c){return res.status(500).json({error:"Backup failed"})}const b={id,file:id+".tar",size:bytes(dest),time:Date.now()};db.backups.push(b);save();res.json({ok:true,backup:b})})});
+app.get("/api/backup/download",auth,instanceMiddleware,(req,res)=>{const b=db.backups.find(x=>x.id===req.query.id);if(!b)return res.status(404).end();res.download(path.join(BACKUPS,b.file),b.file)});
+app.delete("/api/backup",auth,instanceMiddleware,(req,res)=>{const b=db.backups.find(x=>x.id===req.query.id);if(!b)return res.status(404).end();fs.rmSync(path.join(BACKUPS,b.file),{force:true});db.backups=db.backups.filter(x=>x.id!==b.id);save();res.json({ok:true})});
+app.post("/api/backup/restore",auth,instanceMiddleware,(req,res)=>{const b=db.backups.find(x=>x.id===req.body.id);if(!b)return res.status(404).end();if(mc)return res.status(409).json({error:"Stop server first"});const cp=spawn("tar",["-xf",path.join(BACKUPS,b.file),"-C",ROOT]);cp.on("close",c=>res.json({ok:c===0}))});
 
-app.get("/api/settings",auth,(req,res)=>res.json(db.settings));
-app.put("/api/settings",auth,(req,res)=>{db.settings={...db.settings,...req.body};save();res.json(db.settings)});
+app.get("/api/settings",auth,instanceMiddleware,(req,res)=>res.json({...db.settings,...currentInstance()}));
+app.put("/api/settings",auth,instanceMiddleware,(req,res)=>{const x=currentInstance();Object.assign(x,{name:req.body.name??x.name,maxPlayers:Number(req.body.maxPlayers||x.maxPlayers||20),memory:Number(req.body.memory||x.memory||4096),port:Number(req.body.port||x.port)});save();res.json(x)});
 
-app.get("/api/installer/catalog",auth,(req,res)=>res.json({
+app.get("/api/installer/catalog",auth,instanceMiddleware,(req,res)=>res.json({
   software:["Paper","Spigot","Fabric","Forge","NeoForge","Velocity","Waterfall"],
   versions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1","1.20.6","1.20.4","1.20.2","1.20.1"],
   proxyVersions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1","1.20.6","1.20.4","1.20.1","1.19.4","1.18.2"]
 }));
-app.get("/api/installer/detect",auth,(req,res)=>res.json({software:db.settings.software,version:detectVersion(),java:javaFor(db.settings.version)}));
-app.post("/api/installer/install",auth,ownerOrAdmin,async(req,res)=>{try{await installServer(req.body.software,req.body.version);res.json({ok:true})}catch(e){log("[installer] ERROR "+e.message);res.status(500).json({error:e.message})}});
-app.get("/api/installer/logs",auth,(req,res)=>res.json(consoleLines.filter(x=>x.includes("[installer]")||x.includes("[forge]")||x.includes("[neoforge]")).slice(-200)));
+app.get("/api/installer/detect",auth,instanceMiddleware,(req,res)=>res.json({software:db.settings.software,version:detectVersion(),java:javaFor(db.settings.version)}));
+app.post("/api/installer/install",auth,instanceMiddleware,ownerOrAdmin,async(req,res)=>{try{await installServer(req.body.software,req.body.version);res.json({ok:true})}catch(e){log("[installer] ERROR "+e.message);res.status(500).json({error:e.message})}});
+app.get("/api/installer/logs",auth,instanceMiddleware,(req,res)=>res.json(consoleLines.filter(x=>x.includes("[installer]")||x.includes("[forge]")||x.includes("[neoforge]")).slice(-200)));
 
-app.get("/api/mods/search",auth,async(req,res)=>{try{res.json(await modrinthSearch(req.query.q||"",req.query.loader||"",req.query.gameVersion||detectVersion()))}catch(e){res.status(500).json({error:e.message})}});
-app.post("/api/mods/install",auth,async(req,res)=>{try{res.json({ok:true,file:await modrinthInstall(req.body.project,req.body.loader,req.body.gameVersion||detectVersion())})}catch(e){res.status(500).json({error:e.message})}});
-app.get("/api/curseforge/search",auth,async(req,res)=>{try{res.json(await curseSearch(req.query.q||"",req.query.gameVersion||detectVersion()))}catch(e){res.status(500).json({error:e.message})}});
-app.post("/api/curseforge/install",auth,async(req,res)=>{try{res.json({ok:true,file:await curseInstall(req.body.id,req.body.gameVersion||detectVersion())})}catch(e){res.status(500).json({error:e.message})}});
-app.get("/api/addons/installed",auth,(req,res)=>res.json(db.installedAddons));
+app.get("/api/mods/search",auth,instanceMiddleware,async(req,res)=>{try{res.json(await modrinthSearch(req.query.q||"",req.query.loader||"",req.query.gameVersion||detectVersion()))}catch(e){res.status(500).json({error:e.message})}});
+app.post("/api/mods/install",auth,instanceMiddleware,async(req,res)=>{try{res.json({ok:true,file:await modrinthInstall(req.body.project,req.body.loader,req.body.gameVersion||detectVersion())})}catch(e){res.status(500).json({error:e.message})}});
+app.get("/api/curseforge/search",auth,instanceMiddleware,async(req,res)=>{try{res.json(await curseSearch(req.query.q||"",req.query.gameVersion||detectVersion()))}catch(e){res.status(500).json({error:e.message})}});
+app.post("/api/curseforge/install",auth,instanceMiddleware,async(req,res)=>{try{res.json({ok:true,file:await curseInstall(req.body.id,req.body.gameVersion||detectVersion())})}catch(e){res.status(500).json({error:e.message})}});
+app.get("/api/addons/installed",auth,instanceMiddleware,(req,res)=>res.json(db.installedAddons));
 
 app.get("/api/health",(_,res)=>res.json({ok:true}));
 
@@ -162,4 +217,4 @@ app.get("/invite/:id",(req,res)=>res.sendFile(path.join(__dirname,"public","inde
 
 const server=app.listen(PORT,()=>console.log(`BlockHost listening on ${PORT}`));
 wss=new WebSocketServer({server});
-wss.on("connection",ws=>{ws.send(JSON.stringify({type:"consoleHistory",lines:consoleLines}));ws.send(JSON.stringify({type:"metrics",...metrics}));ws.send(JSON.stringify({type:"status",running:!!mc}))});
+wss.on("connection",ws=>{try{const u=new URL(ws._socket.server?"/":"http://localhost");}catch{}ws.send(JSON.stringify({type:"consoleHistory",lines:consoleLines}));ws.send(JSON.stringify({type:"metrics",...metrics}));ws.send(JSON.stringify({type:"status",running:!!mc}))});

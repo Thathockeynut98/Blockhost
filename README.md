@@ -34,3 +34,17 @@ in a `.env` file next to docker-compose.yml, then rebuild/restart.
 This is a self-hosted beta. Put it behind HTTPS/reverse proxy before exposing it to the public internet. Do not publish your CurseForge key. Minecraft EULA acceptance remains the operator's responsibility.
 
 The Modrinth integration uses their public API and downloads the selected version file. Their API documents version filtering by Minecraft version and loader. Paper/Velocity/Waterfall downloads use PaperMC's downloads service. Forge and NeoForge use their official installers. See the project documentation for the upstream services.
+
+## Multi-server instances
+BlockHost v5 introduces independent instances. Each instance has:
+- its own directory under `servers/<instance-id>`
+- its own port
+- RAM allocation
+- software/version
+- files, mods/plugins and backups
+- player/activity data
+- per-instance access permissions
+
+Built-in examples are intended to be created as `Survival`, `Creative`, `Modded`, and `Proxy`, but you can create arbitrary server types.
+
+The owner/admin can create, edit and delete instances. Members only see instances explicitly granted to them.

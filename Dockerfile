@@ -4,6 +4,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY . .
-RUN mkdir -p /app/data /app/servers/main/{mods,plugins,backups}
+RUN mkdir -p /app/data /app/servers/main/mods /app/servers/main/plugins /app/servers/main/backups
 EXPOSE 8080 25565
 CMD ["node","server.js"]
