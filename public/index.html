@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BlockHost — Minecraft Server</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside>
+  <div class="brand"><div class="cube">▦</div><div><b>BlockHost</b><small>Minecraft Server</small></div></div>
+  <nav>
+    <button class="nav active" data-tab="overview">⌂ <span>Overview</span></button>
+    <button class="nav" data-tab="console">▸ <span>Console</span></button>
+    <button class="nav" data-tab="files">□ <span>Files</span></button>
+    <button class="nav" data-tab="players">♙ <span>Players</span></button>
+    <button class="nav" data-tab="settings">⚙ <span>Settings</span></button>
+  </nav>
+  <div class="side-server"><span id="dot"></span><div><b>My Survival World</b><small>Java Edition · 25565</small></div></div>
+</aside>
+
+<main>
+<header>
+ <div><h1 id="title">Overview</h1><p>Manage your Minecraft server from one place.</p></div>
+ <div class="actions"><button id="restart" class="secondary">Restart</button><button id="power" class="power">Start Server</button></div>
+</header>
+
+<section id="overview" class="tab">
+ <div class="hero">
+   <div><span class="pill offline" id="statusPill">● Offline</span><h2>My Survival World</h2><p>Friends can connect using your public address once port forwarding is configured.</p></div>
+   <div class="bigstatus"><span id="bigDot"></span><b id="bigStatus">Offline</b><small id="uptime">Uptime 0m</small></div>
+ </div>
+ <div class="grid4">
+  <div class="card"><span>CPU</span><strong id="cpu">0%</strong><small>Host process</small></div>
+  <div class="card"><span>Memory</span><strong id="ram">0 MB</strong><small>Dashboard process</small></div>
+  <div class="card"><span>Players</span><strong id="count">0 / 20</strong><small>Online now</small></div>
+  <div class="card"><span>TPS</span><strong id="tps">20.0</strong><small>Target 20</small></div>
+ </div>
+ <div class="two">
+  <div class="panel"><div class="panelhead"><h3>Server health</h3><span class="good">Healthy</span></div><div class="bars"><div><label>CPU</label><i><em id="cpuBar"></em></i></div><div><label>Memory</label><i><em id="ramBar"></em></i></div><div><label>TPS</label><i><em id="tpsBar"></em></i></div></div></div>
+  <div class="panel"><div class="panelhead"><h3>Quick connect</h3></div><div class="connect"><code id="address">localhost:25565</code><button onclick="copyAddress()">Copy</button></div><p class="muted">For friends outside your network, forward TCP port 25565 to this computer and use your public IP/domain.</p></div>
+ </div>
+</section>
+
+<section id="console" class="tab hidden"><div class="panel console"><div class="panelhead"><h3>Live console</h3><span class="good" id="consoleState">Disconnected</span></div><pre id="log"></pre><div class="command"><input id="cmd" placeholder="Type a server command, e.g. list"><button onclick="command()">Send</button></div></div></section>
+
+<section id="files" class="tab hidden"><div class="panel"><div class="panelhead"><h3>Server files</h3><div><button onclick="newFile()">New file</button><button onclick="refreshFiles()">Refresh</button></div></div><div id="fileList" class="filelist"></div></div><div id="editor" class="panel hidden"><div class="panelhead"><h3 id="editName">File</h3><button onclick="saveFile()">Save</button></div><textarea id="editText"></textarea></div></section>
+
+<section id="players" class="tab hidden"><div class="panel"><div class="panelhead"><h3>Players online</h3><span id="playerCount">0 online</span></div><div id="playerList" class="playerlist"><div class="empty">No players online.</div></div></div></section>
+
+<section id="settings" class="tab hidden"><div class="panel settings"><h3>Server settings</h3><label>Server name<input value="My Survival World"></label><label>Minecraft port<input value="25565"></label><label>Maximum players<input value="20"></label><label>Difficulty<select><option>Normal</option><option>Easy</option><option>Hard</option><option>Peaceful</option></select></label><p class="muted">These controls are UI-ready. The actual Minecraft properties live in <code>server.properties</code>.</p></div></section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
