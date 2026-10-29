@@ -1,9 +1,9 @@
-FROM node:22-bookworm
-RUN apt-get update && apt-get install -y openjdk-17-jre-headless openjdk-21-jre-headless procps iproute2 util-linux curl ca-certificates tar && rm -rf /var/lib/apt/lists/*
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io ca-certificates curl tar gzip && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package*.json ./
+COPY package.json ./
 RUN npm install --omit=dev
 COPY . .
-RUN mkdir -p /app/data /app/servers/main/mods /app/servers/main/plugins /app/servers/main/backups
-EXPOSE 8080 25565
+RUN mkdir -p /app/data/uploads /app/data/backups
+EXPOSE 8080
 CMD ["node","server.js"]

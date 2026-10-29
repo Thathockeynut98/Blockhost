@@ -1,50 +1,44 @@
-# BlockHost v4
+# BlockHost v6 — Self-Hosted Minecraft Hosting Platform
 
-A self-hosted Minecraft server control panel for friends.
+BlockHost v6 turns the multi-server dashboard into a container-oriented hosting control plane.
 
-## What's new
-- Paper, Spigot, Fabric, Forge, NeoForge
-- Velocity and Waterfall proxy installation
-- Real automatic server JAR/installer downloads
-- Automatic Minecraft/server software detection
-- Modrinth search + one-click downloads
-- Optional CurseForge API integration + one-click downloads
-- Java 17/21 detection and automatic Java selection
-- Real host/container CPU, RAM, disk and network metrics
-- Local user accounts with password hashing and sessions
-- Roles: owner/admin/member
-- Public Invite Friends links with expiry and use limits
-- Per-user server access controls
-- Existing console/files/players/backups controls retained
+## Included
+- Per-instance Docker container isolation using `itzg/minecraft-server` and `itzg/mc-proxy`
+- Per-instance CPU and RAM limits enforced by Docker
+- Automatic public port allocation and collision checks
+- Survival, Creative, Modded, Proxy and Vanilla templates
+- Four-step server creation wizard with explicit EULA acceptance
+- Paper, Fabric, Forge, NeoForge, Vanilla, Velocity and Waterfall runtime selection
+- Persistent per-instance Docker volumes
+- Automatic backup and restart schedules
+- Backup download, restore and deletion
+- Proxy-to-backend private Docker networking
+- Velocity backend configuration generation
+- Authentication, owner/admin/member roles and per-instance access
+- Public invite links with expiry, use limits and permissions
+- Container console through Docker logs + RCON
+- File browser/editor/upload/folder/rename/delete via the instance volume
+- Live Docker container resource metrics
 
-## Run
-1. Install Docker Desktop.
-2. Extract this project.
-3. From the project folder:
-   `docker compose up -d --build`
-4. Open http://localhost:8080
-5. The first account created becomes the owner.
+## Architecture
+BlockHost itself is the control plane. Each Minecraft server is an independent container attached to `blockhost-net`, with its own volume and Docker resource limits. This keeps crashes, JVM memory pressure and server files isolated from the panel and from other instances.
 
-## CurseForge
-CurseForge's API requires an API key. Set:
-`CURSEFORGE_API_KEY=your_key`
-in a `.env` file next to docker-compose.yml, then rebuild/restart.
+The panel needs access to `/var/run/docker.sock` to create and manage server containers. **Treat the BlockHost panel as a trusted administrator application** and do not expose it directly to an untrusted network without HTTPS, strong authentication, backups and host-level hardening.
+
+## Start
+```bash
+docker compose up -d --build
+```
+Then open `http://localhost:8080` and create the first account.
+
+The first account becomes `owner`.
+
+## Docker requirements
+- Docker Engine / Docker Desktop with Compose v2
+- The BlockHost container must be allowed to access the Docker socket.
+- Internet access is required when an instance first starts so the selected Minecraft/proxy image can download its runtime.
 
 ## Important
-This is a self-hosted beta. Put it behind HTTPS/reverse proxy before exposing it to the public internet. Do not publish your CurseForge key. Minecraft EULA acceptance remains the operator's responsibility.
+Minecraft EULA acceptance is intentionally explicit in the creation wizard. BlockHost does not silently accept it for you.
 
-The Modrinth integration uses their public API and downloads the selected version file. Their API documents version filtering by Minecraft version and loader. Paper/Velocity/Waterfall downloads use PaperMC's downloads service. Forge and NeoForge use their official installers. See the project documentation for the upstream services.
-
-## Multi-server instances
-BlockHost v5 introduces independent instances. Each instance has:
-- its own directory under `servers/<instance-id>`
-- its own port
-- RAM allocation
-- software/version
-- files, mods/plugins and backups
-- player/activity data
-- per-instance access permissions
-
-Built-in examples are intended to be created as `Survival`, `Creative`, `Modded`, and `Proxy`, but you can create arbitrary server types.
-
-The owner/admin can create, edit and delete instances. Members only see instances explicitly granted to them.
+The proxy integration uses `itzg/mc-proxy` and connects backend instances through the private Docker network. Velocity is the recommended proxy for new networks; Waterfall support is retained for compatibility.

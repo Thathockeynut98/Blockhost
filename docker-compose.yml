@@ -4,12 +4,12 @@ services:
     container_name: blockhost
     ports:
       - "8080:8080"
-      - "25565:25565"
     volumes:
-      - ./data:/app/data
-      - ./servers:/app/servers
+      - blockhost_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
     environment:
       PORT: 8080
-      MC_PORT: 25565
-      CURSEFORGE_API_KEY: ${CURSEFORGE_API_KEY:-}
-    restart: unless-stopped
+      TZ: ${TZ:-UTC}
+volumes:
+  blockhost_data:
