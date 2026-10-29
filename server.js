@@ -315,7 +315,7 @@ app.post("/api/docker-import",auth,admin,async(req,res)=>{
   const supported={VANILLA:"Vanilla",PAPER:"Paper",SPIGOT:"Spigot",PURPUR:"Purpur",FABRIC:"Fabric",FORGE:"Forge",NEOFORGE:"NeoForge"};
   if(!supported[type])return res.status(400).json({error:"Unsupported server type: "+type});
   x={id:newId,name,template:"survival",type:"Imported",software:supported[type],version:String(env.VERSION||"LATEST").slice(0,40),
-    port,rconPort,memory:safeNum(parseInt(env.MEMORY)||3072,3072,512,65536),cpu:2,disk:20,
+    port,rconPort,memory:safeNum((()=>{const m=String(env.MEMORY||"3072M").match(/^([0-9]+)\\s*([GMK])?/i);if(!m)return 3072;const n=Number(m[1]);return m[2]?.toUpperCase()==="G"?n*1024:m[2]?.toUpperCase()==="K"?Math.ceil(n/1024):n})(),3072,512,65536),cpu:2,disk:20,
     maxPlayers:safeNum(env.MAX_PLAYERS,20,1,5000),gamemode:env.MODE||"survival",
     permissions:[],eulaAccepted:true,autoStart:false,status:"stopped",container:null,
     rconPassword:crypto.randomBytes(18).toString("hex"),imported:true,
