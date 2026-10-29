@@ -1,55 +1,16 @@
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BlockHost — Minecraft Server</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<aside>
-  <div class="brand"><div class="cube">▦</div><div><b>BlockHost</b><small>Minecraft Server</small></div></div>
-  <nav>
-    <button class="nav active" data-tab="overview">⌂ <span>Overview</span></button>
-    <button class="nav" data-tab="console">▸ <span>Console</span></button>
-    <button class="nav" data-tab="files">□ <span>Files</span></button>
-    <button class="nav" data-tab="players">♙ <span>Players</span></button>
-    <button class="nav" data-tab="settings">⚙ <span>Settings</span></button>
-  </nav>
-  <div class="side-server"><span id="dot"></span><div><b>My Survival World</b><small>Java Edition · 25565</small></div></div>
-</aside>
-
-<main>
-<header>
- <div><h1 id="title">Overview</h1><p>Manage your Minecraft server from one place.</p></div>
- <div class="actions"><button id="restart" class="secondary">Restart</button><button id="power" class="power">Start Server</button></div>
-</header>
-
-<section id="overview" class="tab">
- <div class="hero">
-   <div><span class="pill offline" id="statusPill">● Offline</span><h2>My Survival World</h2><p>Friends can connect using your public address once port forwarding is configured.</p></div>
-   <div class="bigstatus"><span id="bigDot"></span><b id="bigStatus">Offline</b><small id="uptime">Uptime 0m</small></div>
- </div>
- <div class="grid4">
-  <div class="card"><span>CPU</span><strong id="cpu">0%</strong><small>Host process</small></div>
-  <div class="card"><span>Memory</span><strong id="ram">0 MB</strong><small>Dashboard process</small></div>
-  <div class="card"><span>Players</span><strong id="count">0 / 20</strong><small>Online now</small></div>
-  <div class="card"><span>TPS</span><strong id="tps">20.0</strong><small>Target 20</small></div>
- </div>
- <div class="two">
-  <div class="panel"><div class="panelhead"><h3>Server health</h3><span class="good">Healthy</span></div><div class="bars"><div><label>CPU</label><i><em id="cpuBar"></em></i></div><div><label>Memory</label><i><em id="ramBar"></em></i></div><div><label>TPS</label><i><em id="tpsBar"></em></i></div></div></div>
-  <div class="panel"><div class="panelhead"><h3>Quick connect</h3></div><div class="connect"><code id="address">localhost:25565</code><button onclick="copyAddress()">Copy</button></div><p class="muted">For friends outside your network, forward TCP port 25565 to this computer and use your public IP/domain.</p></div>
- </div>
-</section>
-
-<section id="console" class="tab hidden"><div class="panel console"><div class="panelhead"><h3>Live console</h3><span class="good" id="consoleState">Disconnected</span></div><pre id="log"></pre><div class="command"><input id="cmd" placeholder="Type a server command, e.g. list"><button onclick="command()">Send</button></div></div></section>
-
-<section id="files" class="tab hidden"><div class="panel"><div class="panelhead"><h3>Server files</h3><div><button onclick="newFile()">New file</button><button onclick="refreshFiles()">Refresh</button></div></div><div id="fileList" class="filelist"></div></div><div id="editor" class="panel hidden"><div class="panelhead"><h3 id="editName">File</h3><button onclick="saveFile()">Save</button></div><textarea id="editText"></textarea></div></section>
-
-<section id="players" class="tab hidden"><div class="panel"><div class="panelhead"><h3>Players online</h3><span id="playerCount">0 online</span></div><div id="playerList" class="playerlist"><div class="empty">No players online.</div></div></div></section>
-
-<section id="settings" class="tab hidden"><div class="panel settings"><h3>Server settings</h3><label>Server name<input value="My Survival World"></label><label>Minecraft port<input value="25565"></label><label>Maximum players<input value="20"></label><label>Difficulty<select><option>Normal</option><option>Easy</option><option>Hard</option><option>Peaceful</option></select></label><p class="muted">These controls are UI-ready. The actual Minecraft properties live in <code>server.properties</code>.</p></div></section>
-</main>
-<script src="app.js"></script>
-</body>
-</html>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BlockHost</title><link rel="stylesheet" href="style.css"></head><body>
+<aside><div class="brand"><div class="logo">▦</div><div><b>BlockHost</b><small>Minecraft hosting</small></div></div>
+<nav><button class="nav active" data-tab="dashboard">⌂ Dashboard</button><button class="nav" data-tab="console">▸ Console</button><button class="nav" data-tab="files">□ Files</button><button class="nav" data-tab="players">♙ Players</button><button class="nav" data-tab="backups">◴ Backups</button><button class="nav" data-tab="mods">⬡ Mods & Plugins</button><button class="nav" data-tab="settings">⚙ Settings</button></nav>
+<div class="servercard"><span id="sideDot"></span><div><b>My Survival World</b><small>Java · <span id="sideStatus">Offline</span></small></div></div></aside>
+<main><header><div><h1 id="heading">Dashboard</h1><p>Everything you need to run your server.</p></div><div class="actions"><button onclick="restart()">Restart</button><button id="power" class="primary" onclick="togglePower()">Start Server</button></div></header>
+<section id="dashboard" class="tab"><div class="hero"><div><span id="pill" class="pill">● Offline</span><h2 id="serverName">My Survival World</h2><p>Server version: <b id="version">Unknown</b> · Port <b>25565</b></p></div><div class="status"><b id="status">Offline</b><small id="uptime">Uptime 0m</small></div></div>
+<div class="cards"><div class="card"><span>TPS</span><strong id="tps">20.0</strong><small>Target 20</small></div><div class="card"><span>CPU</span><strong id="cpu">0%</strong><div class="spark" id="cpuSpark"></div></div><div class="card"><span>RAM</span><strong id="ram">0 MB</strong><div class="spark" id="ramSpark"></div></div><div class="card"><span>Disk</span><strong id="disk">0 MB</strong><div class="spark" id="diskSpark"></div></div><div class="card"><span>Network</span><strong id="net">0 KB/s</strong><small>in + out</small></div><div class="card"><span>Players</span><strong id="players">0 / 20</strong><small>online</small></div></div>
+<div class="twocol"><div class="panel"><div class="ph"><h3>Health</h3><span class="good">Live</span></div><div class="metric"><label>TPS</label><div><i><em id="tpsbar"></em></i><b id="tpsval">20.0</b></div></div><div class="metric"><label>CPU</label><div><i><em id="cpubar"></em></i><b id="cpuval">0%</b></div></div><div class="metric"><label>RAM</label><div><i><em id="rambar"></em></i><b id="ramval">0 MB</b></div></div><div class="metric"><label>Disk</label><div><i><em id="diskbar"></em></i><b id="diskval">0 MB</b></div></div></div>
+<div class="panel"><div class="ph"><h3>Quick actions</h3></div><div class="quick"><button onclick="sendCmd('save-all')">Save world</button><button onclick="sendCmd('list')">Refresh players</button><button onclick="backup()">Create backup</button><button onclick="openTab('files')">Open files</button><button onclick="openTab('players')">Manage players</button><button onclick="openTab('settings')">Server settings</button></div></div></div></section>
+<section id="console" class="tab hidden"><div class="panel"><div class="ph"><h3>Live console</h3><span id="consoleState">Disconnected</span></div><pre id="log"></pre><div class="cmd"><input id="command" placeholder="Enter Minecraft command, e.g. say Hello"><button onclick="sendCommand()">Send</button></div></div></section>
+<section id="files" class="tab hidden"><div class="panel"><div class="ph"><h3>File manager</h3><div><button onclick="newFolder()">New folder</button><label class="upload">Upload<input type="file" onchange="upload(this.files[0])"></label><button onclick="refreshFiles()">Refresh</button></div></div><div id="fileList"></div></div><div id="editor" class="panel hidden editor"><div class="ph"><h3 id="editName">Editor</h3><button onclick="saveEdit()">Save</button></div><textarea id="edit"></textarea></div></section>
+<section id="players" class="tab hidden"><div class="panel"><div class="ph"><h3>Players</h3><span id="playerSummary">0 online</span></div><div id="playerRows"></div><h3>Player activity</h3><div id="activity"></div></div></section>
+<section id="backups" class="tab hidden"><div class="panel"><div class="ph"><h3>Backups</h3><button onclick="backup()">Create backup now</button></div><div id="backupRows"></div><div class="schedule"><h3>Automatic backups</h3><label><input type="checkbox" id="backupEnabled"> Enable</label><input id="backupMinutes" type="number" min="5" value="60"> minutes <button onclick="saveBackupSettings()">Save</button></div></div></section>
+<section id="mods" class="tab hidden"><div class="panel"><div class="ph"><h3>Mods & Plugins</h3><span>Paper · Spigot · Fabric · Forge · NeoForge</span></div><div class="install"><select id="modType"><option>Paper Plugin</option><option>Spigot Plugin</option><option>Fabric Mod</option><option>Forge Mod</option><option>NeoForge Mod</option></select><input id="modName" placeholder="Name"><input id="modUrl" placeholder="Direct .jar URL (optional)"><button onclick="addMod()">Add to library</button></div><div id="modRows"></div><p class="note">The hoster tracks the mod/plugin library. For safety, only install JARs from sources you trust. A full Modrinth/CurseForge installer can be plugged in next.</p></div></section>
+<section id="settings" class="tab hidden"><div class="panel settings"><h3>Server settings</h3><label>Server name<input id="setName"></label><label>Maximum players<input id="setMax" type="number"></label><label>Auto-restart <input id="auto" type="checkbox"></label><label>Restart every <input id="restartMin" type="number" min="5"> minutes</label><div class="row"><button onclick="saveSettings()">Save settings</button><button onclick="openProperties()">Edit server.properties</button></div></div><div id="propPanel" class="panel hidden editor"><div class="ph"><h3>server.properties</h3><button onclick="saveProperties()">Save</button></div><textarea id="properties"></textarea></div></section>
+</main><script src="app.js"></script></body></html>

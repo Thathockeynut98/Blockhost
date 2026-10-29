@@ -1,7 +1,7 @@
 services:
-  hoster:
+  blockhost:
     build: .
-    container_name: minecraft-hoster
+    container_name: blockhost
     ports:
       - "8080:8080"
       - "25565:25565"
@@ -9,6 +9,6 @@ services:
       - ./data:/app/data
       - ./servers:/app/servers
     environment:
-      - PORT=8080
-      - MC_PORT=25565
+      PORT: 8080
+      MC_PORT: 25565
     restart: unless-stopped

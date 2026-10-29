@@ -1,32 +1,34 @@
-let currentFile="";
-const $=id=>document.getElementById(id);
-document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.querySelectorAll(".tab").forEach(x=>x.classList.add("hidden"));$(b.dataset.tab).classList.remove("hidden");if(b.dataset.tab==="files")refreshFiles();});
-async function api(url,opt){let r=await fetch(url,opt);return r.json();}
-function fmt(sec){let h=Math.floor(sec/3600),m=Math.floor(sec%3600/60);return h?`${h}h ${m}m`:`${m}m`;}
-function render(s){
- const on=s.running;$("power").textContent=on?"Stop Server":"Start Server";$("power").className=on?"power":"power";
- $("statusPill").textContent=on?"● Online":"● Offline";$("statusPill").className="pill "+(on?"online":"offline");
- $("bigStatus").textContent=on?"Online":"Offline";$("uptime").textContent="Uptime "+fmt(s.uptime);
- $("dot").classList.toggle("on",on);$("bigDot").classList.toggle("on",on);
- $("cpu").textContent=s.cpu+"%";$("cpuBar").style.width=Math.min(s.cpu,100)+"%";
- $("ram").textContent=Math.round(s.ram/1048576)+" MB";$("ramBar").style.width=Math.min(s.ram/1048576/20,100)+"%";
- $("count").textContent=s.players.length+" / 20";$("tps").textContent=s.tps.toFixed(1);$("tpsBar").style.width=(s.tps/20*100)+"%";
- $("address").textContent=location.hostname+":25565";
- $("playerCount").textContent=s.players.length+" online";
- $("playerList").innerHTML=s.players.length?s.players.map(p=>`<div class="player">● ${escapeHtml(p.name)}</div>`).join(""):'<div class="empty">No players online.</div>';
- $("consoleState").textContent=on?"Connected":"Disconnected";
-}
-function escapeHtml(x){return x.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));}
-async function refresh(){render(await api("/api/status"));$("log").textContent=(await api("/api/console")).join("\n");$("log").scrollTop=$("log").scrollHeight}
-$("power").onclick=async()=>{let s=await api("/api/status");await api(s.running?"/api/stop":"/api/start",{method:"POST"});setTimeout(refresh,500)};
-$("restart").onclick=async()=>{await api("/api/restart",{method:"POST"});setTimeout(refresh,500)};
-async function command(){let x=$("cmd");if(!x.value)return;await api("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({command:x.value})});x.value="";}
-$("cmd").addEventListener("keydown",e=>{if(e.key==="Enter")command()});
-async function refreshFiles(){let a=await api("/api/files");$("fileList").innerHTML=a.map(f=>`<div class="file" onclick="${f.type==="file"?`openFile('${encodeURIComponent(f.path)}')`:''}"><b>${f.type==="dir"?"📁":"📄"} ${escapeHtml(f.name)}</b><span>${f.type==="dir"?"Folder":f.size+" bytes"}</span></div>`).join("")}
-async function openFile(p){currentFile=decodeURIComponent(p);$("editor").classList.remove("hidden");$("editName").textContent=currentFile;$("editText").value=await fetch("/api/file?path="+encodeURIComponent(currentFile)).then(r=>r.text());}
-async function saveFile(){await api("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:currentFile,content:$("editText").value})});alert("Saved.");refreshFiles();}
-async function newFile(){let n=prompt("File name (example: server.properties)");if(!n)return;await api("/api/file",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:n})});refreshFiles();}
-function copyAddress(){navigator.clipboard.writeText($("address").textContent);alert("Address copied.");}
-const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
-ws.onmessage=e=>{let d=JSON.parse(e.data);if(d.type==="console"){$("log").textContent+=($("log").textContent?"\n":"")+d.line;$("log").scrollTop=$("log").scrollHeight} if(d.type==="players")refresh(); if(d.type==="status")refresh();};
-refresh();setInterval(refresh,3000);
+const $=x=>document.getElementById(x);let currentPath="",currentFile="";
+function openTab(id){document.querySelectorAll(".tab").forEach(x=>x.classList.add("hidden"));$(id).classList.remove("hidden");document.querySelectorAll(".nav").forEach(x=>x.classList.toggle("active",x.dataset.tab===id));$("heading").textContent=id==="mods"?"Mods & Plugins":id[0].toUpperCase()+id.slice(1);if(id==="files")refreshFiles();if(id==="players")loadPlayers();if(id==="backups")loadBackups();if(id==="mods")loadMods();}
+document.querySelectorAll(".nav").forEach(x=>x.onclick=()=>openTab(x.dataset.tab));
+async function api(u,o){let r=await fetch(u,o);return r.json()}
+function fmt(s){let h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h}h ${m}m`:`${m}m`}
+function mb(n){return (n/1048576).toFixed(0)+" MB"}
+function render(s){let on=s.running,m=s.metrics||{};$("power").textContent=on?"Stop Server":"Start Server";$("pill").textContent=on?"● Online":"● Offline";$("pill").className="pill "+(on?"on":"");$("status").textContent=on?"Online":"Offline";$("sideStatus").textContent=on?"Online":"Offline";$("sideDot").classList.toggle("on",on);$("uptime").textContent="Uptime "+fmt(m.uptime||0);$("serverName").textContent=s.settings.name;$("version").textContent=s.settings.version;$("tps").textContent=(m.tps||20).toFixed(1);$("cpu").textContent=(m.cpu||0)+"%";$("ram").textContent=mb(m.ram||0);$("disk").textContent=mb(m.disk||0);$("net").textContent=(((m.rx||0)+(m.tx||0))/1024).toFixed(1)+" KB/s";$("players").textContent=s.players.length+" / "+s.settings.maxPlayers;$("tpsval").textContent=(m.tps||20).toFixed(1);$("cpuval").textContent=(m.cpu||0)+"%";$("ramval").textContent=mb(m.ram||0);$("diskval").textContent=mb(m.disk||0);$("tpsbar").style.width=((m.tps||20)/20*100)+"%";$("cpubar").style.width=Math.min(100,m.cpu||0)+"%";$("rambar").style.width=Math.min(100,(m.ram||0)/10485760*100)+"%";$("diskbar").style.width=Math.min(100,(m.disk||0)/1073741824*100)+"%";$("consoleState").textContent=on?"Connected":"Disconnected";}
+async function refresh(){render(await api("/api/status"));let c=await api("/api/console");$("log").textContent=c.join("\n");$("log").scrollTop=$("log").scrollHeight}
+async function togglePower(){let s=await api("/api/status");await api(s.running?"/api/stop":"/api/start",{method:"POST"});setTimeout(refresh,500)}
+async function restart(){await api("/api/restart",{method:"POST"});setTimeout(refresh,500)}
+async function sendCmd(c){if(typeof c!=="string"){c=$("command").value;$("command").value=""}if(c)await api("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({command:c})})}
+$("command").onkeydown=e=>{if(e.key==="Enter")sendCmd()};
+async function refreshFiles(){let a=await api("/api/files?path="+encodeURIComponent(currentPath));$("fileList").innerHTML=(currentPath?`<div class="file" onclick="goUp()">↩ ..</div>`:"")+a.map(f=>`<div class="file" onclick="${f.type==="dir"?`enter('${encodeURIComponent(f.path)}')`:`openFile('${encodeURIComponent(f.path)}')`}"><b>${f.type==="dir"?"📁":"📄"} ${esc(f.name)}</b><small>${f.type==="dir"?"folder":f.size+" bytes"}</small></div>`).join("")}
+function esc(x){return x.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function enter(p){currentPath=decodeURIComponent(p);refreshFiles()}function goUp(){currentPath=currentPath.split("/").slice(0,-1).join("/");refreshFiles()}
+async function openFile(p){currentFile=decodeURIComponent(p);$("editor").classList.remove("hidden");$("editName").textContent=currentFile;$("edit").value=await fetch("/api/file?path="+encodeURIComponent(currentFile)).then(r=>r.text())}
+async function saveEdit(){await api("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:currentFile,content:$("edit").value})});alert("Saved")}
+async function newFolder(){let n=prompt("Folder name");if(n)await api("/api/folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:(currentPath?currentPath+"/":"")+n})});refreshFiles()}
+async function upload(file){if(!file)return;let f=new FormData();f.append("file",file);f.append("path",currentPath);await fetch("/api/upload",{method:"POST",body:f});refreshFiles()}
+async function loadPlayers(){let d=await api("/api/players");$("playerSummary").textContent=d.players.length+" online";$("playerRows").innerHTML=d.known.map(p=>`<div class="player"><span>● ${esc(p.name)} <small>${p.uuid||"UUID unavailable"}</small></span><span><button onclick="playerAction('${esc(p.name)}','op')">OP</button><button onclick="playerAction('${esc(p.name)}','deop')">De-OP</button><button onclick="playerAction('${esc(p.name)}','kick')">Kick</button><button onclick="playerAction('${esc(p.name)}','ban')">Ban</button><button onclick="playerAction('${esc(p.name)}','whitelist')">Whitelist</button></span></div>`).join("")||"<p>No players seen yet.</p>";$("activity").innerHTML=d.activity.map(x=>`<div>${new Date(x.time).toLocaleString()} — <b>${esc(x.name)}</b> — ${esc(x.action)}</div>`).join("")||"No activity yet."}
+async function playerAction(name,action){await api("/api/player/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,action})});loadPlayers()}
+async function backup(){let r=await api("/api/backup",{method:"POST"});if(r.ok)alert("Backup created.");loadBackups()}
+async function loadBackups(){let a=await api("/api/backups");$("backupRows").innerHTML=a.length?a.slice().reverse().map(b=>`<div class="backup"><span>${new Date(b.time).toLocaleString()} · ${mb(b.size)}</span><span><a href="/api/backup/download?id=${encodeURIComponent(b.id)}"><button>Download</button></a><button onclick="restore('${b.id}')">Restore</button><button onclick="deleteBackup('${b.id}')">Delete</button></span></div>`).join(""):"<p class='note'>No backups yet.</p>";let s=await api("/api/status");$("backupEnabled").checked=s.settings.backupEnabled;$("backupMinutes").value=s.settings.backupMinutes}
+async function restore(id){if(confirm("Restore this backup? Stop the server first."))await api("/api/backup/restore",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})})}
+async function deleteBackup(id){await api("/api/backup?id="+encodeURIComponent(id),{method:"DELETE"});loadBackups()}
+async function saveBackupSettings(){await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({backupEnabled:$("backupEnabled").checked,backupMinutes:+$("backupMinutes").value})})}
+async function loadMods(){let a=await api("/api/mods");$("modRows").innerHTML=a.map(m=>`<div class="backup"><span><b>${esc(m.name)}</b> · ${esc(m.type)}<br><small>${esc(m.url||"No URL")}</small></span><button onclick="delMod('${m.id}')">Remove</button></div>`).join("")||"<p class='note'>No mods/plugins in library.</p>"}
+async function addMod(){await api("/api/mods",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("modName").value,type:$("modType").value,url:$("modUrl").value})});$("modName").value="";$("modUrl").value="";loadMods()}
+async function delMod(id){await fetch("/api/mods/"+id,{method:"DELETE"});loadMods()}
+async function loadSettings(){let s=await api("/api/settings");$("setName").value=s.name;$("setMax").value=s.maxPlayers;$("auto").checked=s.autoRestart;$("restartMin").value=s.restartMinutes}
+async function saveSettings(){await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("setName").value,maxPlayers:+$("setMax").value,autoRestart:$("auto").checked,restartMinutes:+$("restartMin").value})});refresh()}
+async function openProperties(){$("propPanel").classList.remove("hidden");$("properties").value=(await api("/api/server-properties")).content}
+async function saveProperties(){await api("/api/server-properties",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:$("properties").value})});alert("server.properties saved")}
+const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>{let d=JSON.parse(e.data);if(d.type==="metrics")refresh();if(d.type==="console"){ $("log").textContent+=($("log").textContent?"\n":"")+d.line;$("log").scrollTop=$("log").scrollHeight}if(d.type==="status")refresh()};refresh();loadSettings();setInterval(refresh,5000);
