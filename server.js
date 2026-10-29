@@ -397,9 +397,9 @@ app.get("/api/telemetry",auth,instanceAuth,async(req,res)=>{
  const rxRate=elapsed?Math.max(0,(metrics.rx-prev.data.rxTotal)/elapsed):0;
  const txRate=elapsed?Math.max(0,(metrics.tx-prev.data.txTotal)/elapsed):0;
  const [list,tpsText,msptText]=await Promise.all([rconTelemetry(x,"list"),rconTelemetry(x,"tps"),rconTelemetry(x,"mspt")]);
- const playerMatch=list?.match(/There are (\\d+) of a max of (\\d+) players online/i);
- const tpsMatch=tpsText?.match(/(?:TPS from last[^:]*:|TPS:)\\s*[^\\d]*(\\d+(?:\\.\\d+)?)/i);
- const msptMatch=msptText?.match(/(?:MSPT[^:]*:|Mean tick time:)\\s*[^\\d]*(\\d+(?:\\.\\d+)?)/i);
+ const playerMatch=list?.match(/There are (\d+) of a max of (\d+) players online/i);
+ const tpsMatch=tpsText?.match(/(?:TPS from last[^:]*:|TPS:)\s*[^\d]*(\d+(?:\.\d+)?)/i);
+ const msptMatch=msptText?.match(/(?:MSPT[^:]*:|Mean tick time:)\s*[^\d]*(\d+(?:\.\d+)?)/i);
  const data={running:true,players:playerMatch?Number(playerMatch[1]):null,maxPlayers:playerMatch?Number(playerMatch[2]):null,tps:tpsMatch?Number(tpsMatch[1]):null,mspt:msptMatch?Number(msptMatch[1]):null,rxRate,txRate,rxTotal:metrics.rx,txTotal:metrics.tx,metrics:{cpu:metrics.cpu,ram:metrics.ram},timestamp};
  telemetryCache.set(x.id,{at:timestamp,data});
  res.json(data);
