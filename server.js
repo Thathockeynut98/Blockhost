@@ -65,7 +65,7 @@ async function statusOf(x){const c=await containerInspect(x);if(!c)return "stopp
 async function updateStatus(x){x.status=await statusOf(x);x.updatedAt=now();return x.status}
 async function allocPort(requested){const used=new Set(Object.values(db.instances).map(x=>x.port));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25565,Number(db.settings.nextPort)||25565);while(used.has(p))p++;db.settings.nextPort=p+1;return p}
 async function allocRcon(requested){const used=new Set(Object.values(db.instances).map(x=>x.rconPort));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25575,Number(db.settings.nextRconPort)||25575);while(used.has(p))p++;db.settings.nextRconPort=p+1;return p}
-function envArgs(x){const e=["--env",`EULA=${x.eulaAccepted===true?"TRUE":"FALSE"}`,"--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{if(x.imported&&x.jar){e.push("--env","TYPE=CUSTOM","--env",`CUSTOM_SERVER=/data/${x.jar.replaceAll("'","'")}`)}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`);}e.push("--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);if(x.maxPlayers)e.push("--env",`MAX_PLAYERS=${x.maxPlayers}`);if(x.gamemode)e.push("--env",`MODE=${x.gamemode}`)}return e}
+function envArgs(x){const e=["--env",`EULA=${x.eulaAccepted===true?"TRUE":"FALSE"}`,"--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{if(x.imported&&x.jar){e.push("--env","TYPE=CUSTOM","--env",`CUSTOM_SERVER=/data/${x.jar.replaceAll("'","'")}`)}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`);}e.push("--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);}return e}
 async function runContainer(x){await ensureNetwork();await ensureVolume(x);const old=await containerInspect(x);if(old)await docker(["rm","-f",containerName(x.id)]).catch(()=>{});
   const args=["run","-d","--name",containerName(x.id),"--network",db.settings.network,"--restart","unless-stopped","--cpus",String(x.cpu),"--memory",`${x.memory}m`,`--memory-swap`,`${x.memory}m`,`-p`,`${x.port}:${x.software==="Waterfall"?25577:25565}/tcp`];
   if(!proxySoftware.has(x.software))args.push("-p",`${x.rconPort}:25575/tcp`);
@@ -240,6 +240,13 @@ app.put("/api/proxy/backends",auth,instanceAuth,async(req,res)=>{if(!proxySoftwa
 
 
 const mcPropertiesPath="/data/server.properties";
+app.post("/api/instances/:id/accept-eula",auth,admin,async(req,res)=>{
+ const x=db.instances[req.params.id];if(!x)return res.status(404).json({error:"Server not found"});
+ if(req.body.acceptEula!==true)return res.status(400).json({error:"Explicit EULA acceptance required"});
+ x.eulaAccepted=true;x.updatedAt=now();save();
+ try{await runContainer(x);res.json({ok:true,restarted:true})}
+ catch(e){res.status(500).json({error:"Acceptance saved but restart failed: "+e.message})}
+});
 app.get("/api/instances/:id/minecraft-settings",auth,async(req,res)=>{
  const x=db.instances[req.params.id];if(!x||!canAccess(req.user,x))return res.status(404).json({error:"Server not found"});
  if(proxySoftware.has(x.software))return res.status(400).json({error:"Proxy servers do not use server.properties"});
