@@ -273,6 +273,65 @@ app.put("/api/instances/:id/minecraft-settings",auth,admin,async(req,res)=>{
  }catch(e){res.status(/Invalid|Unsupported|out of range|must be/.test(e.message)?400:500).json({error:e.message})}
 });
 
+
+/* Import a stopped itzg Minecraft container from a named Docker volume.
+ * Copies its data into a new BlockHost-managed volume; source remains untouched.
+ * Bind mounts are intentionally excluded from this first safe implementation.
+ */
+app.get("/api/docker-import/candidates",auth,admin,async(req,res)=>{
+ try{
+  const ids=(await docker(["ps","-a","--format","{{.ID}}"])).split(/\r?\n/).filter(Boolean);
+  const candidates=[];
+  for(const id of ids){
+   const c=(await dockerJSON(["inspect",id]))[0];
+   if(!/^itzg\/minecraft-server(?::|@|$)/.test(c.Config?.Image||""))continue;
+   if(Object.values(db.instances).some(x=>containerName(x.id)===c.Name?.slice(1)))continue;
+   const m=(c.Mounts||[]).find(m=>m.Destination==="/data");
+   candidates.push({id:c.Id,name:c.Name?.slice(1),state:c.State?.Status,image:c.Config.Image,
+    volume:m?.Type==="volume"?m.Name:null,eligible:!!(m?.Type==="volume"&&c.State?.Status==="exited")});
+  }
+  res.json(candidates);
+ }catch(e){res.status(500).json({error:e.message})}
+});
+app.post("/api/docker-import",auth,admin,async(req,res)=>{
+ const id=String(req.body.containerId||"");
+ if(!/^[a-f0-9]{12,64}$/.test(id))return res.status(400).json({error:"Choose a valid container"});
+ if(req.body.confirmCopy!==true||req.body.eulaAccepted!==true)return res.status(400).json({error:"Confirm data copy and explicitly accept the Minecraft EULA"});
+ let x=null;
+ try{
+  const c=(await dockerJSON(["inspect",id]))[0];
+  if(!/^itzg\/minecraft-server(?::|@|$)/.test(c.Config?.Image||""))return res.status(400).json({error:"Only itzg/minecraft-server containers are supported"});
+  if(c.State?.Status!=="exited")return res.status(409).json({error:"Stop the source container before importing"});
+  if(Object.values(db.instances).some(i=>containerName(i.id)===c.Name?.slice(1)))return res.status(409).json({error:"Already managed by BlockHost"});
+  const mount=(c.Mounts||[]).find(m=>m.Destination==="/data");
+  if(!mount||mount.Type!=="volume"||!mount.Name)return res.status(400).json({error:"Source must have a named Docker volume mounted at /data. Bind mounts are not yet supported."});
+  const env=Object.fromEntries((c.Config.Env||[]).map(v=>{const p=v.indexOf("=");return [v.slice(0,p),v.slice(p+1)]}));
+  const name=String(req.body.name||c.Name?.slice(1)||"Imported Minecraft").trim().slice(0,80);
+  if(!name)return res.status(400).json({error:"Server name required"});
+  const base=idify(name);let newId=base,n=2;
+  while(db.instances[newId])newId=base.slice(0,35)+"-"+n++;
+  const port=await allocPort(),rconPort=await allocRcon();
+  const type=String(env.TYPE||"VANILLA").toUpperCase();
+  const supported={VANILLA:"Vanilla",PAPER:"Paper",SPIGOT:"Spigot",PURPUR:"Purpur",FABRIC:"Fabric",FORGE:"Forge",NEOFORGE:"NeoForge"};
+  if(!supported[type])return res.status(400).json({error:"Unsupported server type: "+type});
+  x={id:newId,name,template:"survival",type:"Imported",software:supported[type],version:String(env.VERSION||"LATEST").slice(0,40),
+    port,rconPort,memory:safeNum(parseInt(env.MEMORY)||3072,3072,512,65536),cpu:2,disk:20,
+    maxPlayers:safeNum(env.MAX_PLAYERS,20,1,5000),gamemode:env.MODE||"survival",
+    permissions:[],eulaAccepted:true,autoStart:false,status:"stopped",container:null,
+    rconPassword:crypto.randomBytes(18).toString("hex"),imported:true,
+    importedFrom:{name:c.Name?.slice(1),volume:mount.Name},createdAt:now(),updatedAt:now()};
+  await ensureVolume(x);
+  // Only read from the source volume. Never modify or remove its container or volume.
+  await docker(["run","--rm","-v",mount.Name+":/source:ro","-v",volumeName(x.id)+":/data",
+    "alpine","sh","-c","cp -a /source/. /data/"]);
+  db.instances[x.id]=x;save();
+  res.json({ok:true,instance:x,sourcePreserved:true});
+ }catch(e){
+  if(x&&!db.instances[x.id])await docker(["volume","rm",volumeName(x.id)]).catch(()=>{});
+  res.status(500).json({error:e.message});
+ }
+});
+
 app.get("/invite/:id",(_,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 
 const server=app.listen(PORT,()=>console.log(`BlockHost 6 listening on ${PORT}`));
