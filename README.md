@@ -1,29 +1,28 @@
-# BlockHost v2
+# BlockHost v3 — Automatic Server Setup
 
-A self-hosted Minecraft server management panel for friends/community servers.
+## New
+- Automatic setup UI for Paper, Spigot, Fabric, Forge and NeoForge.
+- Minecraft version selection.
+- One-click catalog addons for common plugins/mods.
+- Installation progress and live installer logs.
+- Paper and Spigot installation are wired to official/public project APIs/build tooling.
+- Fabric installation uses Fabric's metadata service.
+- Forge/NeoForge are represented in the installer catalog, with production-grade pinned-build installers intentionally left as the next integration because build URLs must be matched to the selected Minecraft version.
 
-## Included
-Dashboard, live TPS/CPU/RAM/disk/network metrics, uptime, players, version, start/stop/restart/kill controls, live console, command execution, file manager, upload/download/delete/create folders, editor, player moderation commands, activity log, backups/restore/download/delete, scheduled-backup settings, mod/plugin library, and server.properties editor.
-
-## Start
+## Run
 1. Install Docker Desktop.
-2. Put a Java Minecraft server JAR at `servers/main/server.jar`.
-3. Put `eula=true` in `servers/main/eula.txt`.
+2. Put this project in a folder.
+3. Put a server JAR in `servers/main/server.jar` only if you want to keep an existing server; the setup page can replace it for supported installers.
 4. Run `docker compose up -d --build`.
 5. Open `http://localhost:8080`.
+6. Open **Server Setup**.
+7. Select software + Minecraft version.
+8. Click **Install / Switch Server**.
 
-## Important
-This project does not bundle Minecraft server software. Use a server JAR and mods/plugins you are licensed/permitted to use.
+## Safety
+Stop the server before switching software. Back up the world before changing loaders or major versions.
 
-The panel should not be exposed directly to the public internet without authentication, HTTPS, and access controls. v2 is a strong local/LAN foundation.
+Do not expose the dashboard publicly without authentication, HTTPS, CSRF protection, rate limiting, and authorization.
 
-## Production roadmap
-- Authentication + sessions + 2FA
-- Real host-level metrics
-- RCON/query integration for exact TPS/player UUIDs
-- Modrinth/CurseForge integration with version compatibility checks
-- Per-server isolation and multiple server instances
-- Scheduled jobs worker
-- Automatic server.jar version management
-- Reverse proxy/HTTPS
-- Audit log and role-based permissions
+## Next production step
+Use pinned official Forge/NeoForge installer coordinates, Modrinth/CurseForge APIs, compatibility checks, server-type detection, multiple server instances, authentication, and per-server isolation.

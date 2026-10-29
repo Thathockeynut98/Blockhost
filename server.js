@@ -1,6 +1,6 @@
 import express from "express";
 import {WebSocketServer} from "ws";
-import {spawn} from "node:child_process";
+import {spawn, execFile} from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -84,6 +84,113 @@ app.delete("/api/mods/:id",(q,r)=>{db.mods=db.mods.filter(x=>x.id!==q.params.id)
 
 app.get("/api/server-properties",(q,r)=>{let p=path.join(ROOT,"server.properties");r.json({content:fs.existsSync(p)?fs.readFileSync(p,"utf8"):""})});
 app.put("/api/server-properties",(q,r)=>{fs.writeFileSync(path.join(ROOT,"server.properties"),String(q.body.content||""));r.json({ok:true})});
+
+
+// --- Server installer / one-click software support ---
+const INSTALL_ROOT=path.join(ROOT,".install");
+fs.mkdirSync(INSTALL_ROOT,{recursive:true});
+const catalogs={
+  Paper:{versions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.3","1.21.1"]},
+  Spigot:{versions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1"]},
+  Fabric:{versions:["1.21.10","1.21.9","1.21.8","1.21.7","1.21.6","1.21.5","1.21.4","1.21.1"]},
+  Forge:{versions:["1.21.1","1.20.6","1.20.4","1.20.2","1.20.1"]},
+  NeoForge:{versions:["1.21.1","1.21","1.20.6","1.20.4"]}
+};
+let installer={busy:false,stage:"idle",progress:0,message:"Ready",software:"",version:"",logs:[]};
+function installLog(x){installer.logs.push(x);if(installer.logs.length>200)installer.logs.shift();send({type:"installer",...installer})}
+function setInstaller(x){installer={...installer,...x};send({type:"installer",...installer})}
+function run(program,args,cwd){
+  return new Promise((resolve,reject)=>{
+    const p=spawn(program,args,{cwd});
+    p.stdout.on("data",d=>d.toString().split(/\r?\n/).filter(Boolean).forEach(installLog));
+    p.stderr.on("data",d=>d.toString().split(/\r?\n/).filter(Boolean).forEach(x=>installLog("[stderr] "+x)));
+    p.on("error",reject); p.on("close",code=>code===0?resolve():reject(new Error(`${program} exited ${code}`)));
+  });
+}
+async function download(url,dest){
+  const res=await fetch(url,{redirect:"follow"});
+  if(!res.ok)throw new Error(`Download failed: ${res.status}`);
+  const buf=Buffer.from(await res.arrayBuffer());fs.writeFileSync(dest,buf);return buf.length;
+}
+function safeName(x){return String(x||"").replace(/[^a-zA-Z0-9._-]/g,"_")}
+async function installServer(software,version){
+  if(installer.busy)throw new Error("An installation is already running");
+  if(mc)throw new Error("Stop the server before installing or changing server software");
+  if(!catalogs[software]?.versions.includes(version))throw new Error("Unsupported version in this starter catalog");
+  setInstaller({busy:true,stage:"preparing",progress:5,message:`Preparing ${software} ${version}`,software,version,logs:[]});
+  try{
+    // Paper: official Paper downloads API.
+    if(software==="Paper"){
+      const meta=await (await fetch(`https://api.papermc.io/v2/projects/paper/versions/${version}/builds/latest`)).json();
+      const build=meta.build, jar=meta.downloads.application.name;
+      setInstaller({stage:"downloading",progress:30,message:`Downloading Paper build ${build}`});
+      await download(`https://api.papermc.io/v2/projects/paper/versions/${version}/builds/${build}/downloads/${jar}`,path.join(ROOT,"server.jar"));
+    } else if(software==="Spigot"){
+      // Spigot's BuildTools creates the selected server JAR.
+      setInstaller({stage:"downloading",progress:15,message:"Downloading BuildTools"});
+      const bt=path.join(INSTALL_ROOT,"BuildTools.jar");
+      await download("https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar",bt);
+      setInstaller({stage:"building",progress:35,message:`Building Spigot ${version} (this can take several minutes)`});
+      await run("java",["-jar",bt,"--rev",version],INSTALL_ROOT);
+      const candidate=path.join(INSTALL_ROOT,`spigot-${version}.jar`);
+      if(!fs.existsSync(candidate))throw new Error("Spigot BuildTools did not produce the expected JAR");
+      fs.copyFileSync(candidate,path.join(ROOT,"server.jar"));
+    } else if(software==="Fabric"){
+      setInstaller({stage:"metadata",progress:15,message:"Finding Fabric loader"});
+      const lm=await (await fetch(`https://meta.fabricmc.net/v2/versions/loader/${version}`)).json();
+      if(!lm?.length)throw new Error("No Fabric loader found for that Minecraft version");
+      const loader=lm[0].loader.version;
+      const installerMeta=await (await fetch("https://meta.fabricmc.net/v2/versions/installer")).json();
+      const installerVersion=installerMeta[0].version;
+      const dest=path.join(ROOT,"server.jar");
+      setInstaller({stage:"downloading",progress:35,message:`Installing Fabric ${version} / loader ${loader}`});
+      await download(`https://meta.fabricmc.net/v2/versions/loader/${version}/${loader}/${installerVersion}/server/jar`,dest);
+    } else if(software==="Forge"){
+      setInstaller({stage:"metadata",progress:20,message:"Finding Forge installer"});
+      const m=await (await fetch(`https://files.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json`)).json().catch(()=>null);
+      const versions=m?.versions?.[version] || null;
+      if(!versions)throw new Error("Forge metadata for this version was not available from the installer catalog");
+      throw new Error("Forge automatic installer needs a pinned Forge build. Choose a catalog build in the production release.");
+    } else if(software==="NeoForge"){
+      setInstaller({stage:"metadata",progress:20,message:"Preparing NeoForge"});
+      throw new Error("NeoForge automatic installer needs a pinned NeoForge build. Choose a catalog build in the production release.");
+    }
+    const props=path.join(ROOT,"server.properties");
+    if(!fs.existsSync(props))fs.writeFileSync(props,`server-port=${MC_PORT}\nmax-players=${db.settings.maxPlayers||20}\nmotd=${db.settings.name||"BlockHost Server"}\n`);
+    if(!fs.existsSync(path.join(ROOT,"eula.txt")))fs.writeFileSync(path.join(ROOT,"eula.txt"),"eula=true\n");
+    db.settings.software=software;db.settings.version=version;save();
+    setInstaller({busy:false,stage:"complete",progress:100,message:`${software} ${version} is ready`});
+    return true;
+  }catch(e){setInstaller({busy:false,stage:"error",progress:0,message:e.message});throw e}
+}
+app.get("/api/installer/catalog",(q,r)=>r.json(catalogs));
+app.get("/api/installer/status",(q,r)=>r.json(installer));
+app.post("/api/installer/install",async(q,r)=>{
+  try{await installServer(String(q.body.software),String(q.body.version));r.json({ok:true,installer})}
+  catch(e){r.status(400).json({ok:false,error:e.message,installer})}
+});
+app.get("/api/server-info",(q,r)=>r.json({software:db.settings.software||"None",version:db.settings.version||"Unknown",installed:fs.existsSync(path.join(ROOT,"server.jar"))}));
+app.get("/api/installer/logs",(q,r)=>r.json(installer.logs));
+
+// --- One-click mod/plugin installer registry ---
+const pluginCatalog=[
+ {id:"geyser",name:"Geyser",kind:"Plugin",platforms:["Paper","Spigot"],description:"Bedrock cross-play bridge",url:"https://geysermc.org/download"},
+ {id:"floodgate",name:"Floodgate",kind:"Plugin",platforms:["Paper","Spigot"],description:"Bedrock authentication companion",url:"https://geysermc.org/download"},
+ {id:"luckperms",name:"LuckPerms",kind:"Plugin",platforms:["Paper","Spigot"],description:"Permissions manager",url:"https://luckperms.net/download"},
+ {id:"worldedit",name:"WorldEdit",kind:"Plugin/Mod",platforms:["Paper","Spigot","Fabric","Forge","NeoForge"],description:"World editing toolkit",url:"https://enginehub.org/worldedit"},
+ {id:"sodium",name:"Sodium",kind:"Mod",platforms:["Fabric","NeoForge"],description:"Client performance mod",url:"https://modrinth.com/mod/sodium"}
+];
+app.get("/api/addons/catalog",(q,r)=>r.json(pluginCatalog));
+app.post("/api/addons/install",async(q,r)=>{
+  const item=pluginCatalog.find(x=>x.id===q.body.id);
+  if(!item)return r.status(404).json({error:"Unknown addon"});
+  const software=db.settings.software||"";
+  if(!item.platforms.includes(software))return r.status(400).json({error:`${item.name} is not listed for ${software}`});
+  const dir=["Fabric","Forge","NeoForge"].includes(software)?path.join(ROOT,"mods"):path.join(ROOT,"plugins");
+  fs.mkdirSync(dir,{recursive:true});
+  db.mods=db.mods||[]; if(!db.mods.some(x=>x.id===item.id))db.mods.push({...item,installed:true,installedAt:Date.now()});save();
+  r.json({ok:true,message:`${item.name} added to the ${path.basename(dir)} library.`,source:item.url});
+});
 
 const server=app.listen(PORT,()=>console.log(`BlockHost: http://localhost:${PORT}`));
 const wss=new WebSocketServer({server});wss.on("connection",ws=>ws.send(JSON.stringify({type:"hello"})));

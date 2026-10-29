@@ -31,4 +31,24 @@ async function loadSettings(){let s=await api("/api/settings");$("setName").valu
 async function saveSettings(){await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("setName").value,maxPlayers:+$("setMax").value,autoRestart:$("auto").checked,restartMinutes:+$("restartMin").value})});refresh()}
 async function openProperties(){$("propPanel").classList.remove("hidden");$("properties").value=(await api("/api/server-properties")).content}
 async function saveProperties(){await api("/api/server-properties",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:$("properties").value})});alert("server.properties saved")}
-const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>{let d=JSON.parse(e.data);if(d.type==="metrics")refresh();if(d.type==="console"){ $("log").textContent+=($("log").textContent?"\n":"")+d.line;$("log").scrollTop=$("log").scrollHeight}if(d.type==="status")refresh()};refresh();loadSettings();setInterval(refresh,5000);
+
+async function loadInstaller(){
+ let cat=await api("/api/installer/catalog"); let types=Object.keys(cat);
+ $("software").innerHTML=types.map(x=>`<option>${x}</option>`).join("");
+ function versions(){let x=cat[$("software").value].versions;$("mcVersion").innerHTML=x.map(v=>`<option>${v}</option>`).join("");loadAddons()}
+ $("software").onchange=versions; versions(); loadAddons();
+}
+async function installServer(){
+ let software=$("software").value,version=$("mcVersion").value;
+ if(!confirm(`Install ${software} ${version}? Stop the server first.`))return;
+ let r=await api("/api/installer/install",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({software,version})});
+ if(!r.ok)alert(r.error);
+}
+async function loadAddons(){
+ let a=await api("/api/addons/catalog"),s=await api("/api/status"),platform=$("software").value;
+ $("addonPlatform").textContent=platform;
+ $("addonRows").innerHTML=a.filter(x=>x.platforms.includes(platform)).map(x=>`<div class="backup"><span><b>${esc(x.name)}</b> · ${esc(x.kind)}<br><small>${esc(x.description)}</small></span><button onclick="installAddon('${x.id}')">Install</button></div>`).join("")||"<p class='note'>No catalog addons for this server type.</p>";
+}
+async function installAddon(id){let r=await api("/api/addons/install",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});alert(r.ok?r.message:r.error)}
+
+const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>{let d=JSON.parse(e.data);if(d.type==="metrics")refresh(); if(d.type==="installer"){ $("installState").textContent=d.stage; $("installBar").style.width=d.progress+"%"; $("installMessage").textContent=d.message; $("installLog").textContent=(d.logs||[]).join("\n"); $("installLog").scrollTop=$("installLog").scrollHeight; if(d.stage==="complete")refresh()}if(d.type==="console"){ $("log").textContent+=($("log").textContent?"\n":"")+d.line;$("log").scrollTop=$("log").scrollHeight}if(d.type==="status")refresh()};refresh();loadSettings();loadInstaller();setInterval(refresh,5000);
