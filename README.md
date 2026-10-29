@@ -1,72 +1,86 @@
-# BlockHost v6 — Self-Hosted Minecraft Hosting Platform
+<div align="center">
 
-BlockHost v6 turns the multi-server dashboard into a container-oriented hosting control plane.
+# ⛏️ BlockHost
 
-## Included
-- Per-instance Docker container isolation using `itzg/minecraft-server` and `itzg/mc-proxy`
-- Per-instance CPU and RAM limits enforced by Docker
-- Automatic public port allocation and collision checks
-- Survival, Creative, Modded, Proxy and Vanilla templates
-- Four-step server creation wizard with explicit EULA acceptance
-- Paper, Fabric, Forge, NeoForge, Vanilla, Velocity and Waterfall runtime selection
-- Persistent per-instance Docker volumes
-- Automatic backup and restart schedules
-- Backup download, restore and deletion
-- Proxy-to-backend private Docker networking
-- Velocity backend configuration generation
-- Authentication, owner/admin/member roles and per-instance access
-- Public invite links with expiry, use limits and permissions
-- Container console through Docker logs + RCON
-- File browser/editor/upload/folder/rename/delete via the instance volume
-- Live Docker container resource metrics
+### Self-hosted Minecraft server management, built for control.
 
-## Architecture
-BlockHost itself is the control plane. Each Minecraft server is an independent container attached to `blockhost-net`, with its own volume and Docker resource limits. This keeps crashes, JVM memory pressure and server files isolated from the panel and from other instances.
+**Multi-server hosting · Docker isolation · Backups · Server imports · Browser dashboard**
 
-The panel needs access to `/var/run/docker.sock` to create and manage server containers. **Treat the BlockHost panel as a trusted administrator application** and do not expose it directly to an untrusted network without HTTPS, strong authentication, backups and host-level hardening.
+![Release](https://img.shields.io/badge/release-v6.2-22c55e?style=for-the-badge) ![Platform](https://img.shields.io/badge/platform-Docker%20%7C%20Windows-2563eb?style=for-the-badge) ![Status](https://img.shields.io/badge/status-Development-f59e0b?style=for-the-badge)
 
-## Start
+</div>
+
+> [!IMPORTANT]
+> **Development build:** This project has not been independently security-audited. Docker socket access grants extensive control over the host. Keep the dashboard on a trusted network behind appropriate access controls.
+
+## Overview
+
+BlockHost is a self-hosted control panel for managing multiple Minecraft servers. Create isolated instances, manage their files and consoles, configure server resources, schedule backups, and import existing Minecraft worlds and servers from archives or a Windows folder.
+
+## Features
+
+| Area | Capabilities |
+|---|---|
+| Server management | Multiple instances, templates, allocated ports, memory/CPU limits |
+| Minecraft software | Paper, Vanilla, Fabric, Forge, NeoForge, Velocity, and legacy options |
+| Operations | Browser console, file manager, live container metrics, scheduled backups |
+| Access | Accounts, roles, instance permissions, invite links |
+| Imports | ZIP/TAR/TAR.GZ/TGZ archives and **direct Windows folder selection** |
+| Infrastructure | Docker-based instance isolation, persistent volumes, private proxy networking |
+
+## Quick start
+
+**Prerequisites:** Docker Desktop or Docker Engine with Compose v2.
+
 ```bash
+git clone https://github.com/YOUR-USERNAME/BlockHost.git
+cd BlockHost
 docker compose up -d --build
 ```
-Then open `http://localhost:8080` and create the first account.
 
-The first account becomes `owner`.
+Open **http://localhost:8080** and create the first account. The first account is assigned the owner role. Only accept the Minecraft EULA when you have reviewed and agreed to it.
 
-## Docker requirements
-- Docker Engine / Docker Desktop with Compose v2
-- The BlockHost container must be allowed to access the Docker socket.
-- Internet access is required when an instance first starts so the selected Minecraft/proxy image can download its runtime.
+> [!CAUTION]
+> The included configuration mounts the Docker socket. **Do not publish this dashboard directly to the internet.** Use HTTPS, network restrictions, and secure credentials before wider deployment.
 
-## Important
-Minecraft EULA acceptance is intentionally explicit in the creation wizard. BlockHost does not silently accept it for you.
+## Import an existing server
 
-The proxy integration uses `itzg/mc-proxy` and connects backend instances through the private Docker network. Velocity is the recommended proxy for new networks; Waterfall support is retained for compatibility.
+From **Import server**, choose either an archive or **Existing folder**. On Windows, select the Minecraft server directory in the browser picker; BlockHost transfers the folder structure without requiring ZIP/TAR packaging. Review detected software, ports, resources, and EULA status before starting the imported server.
 
-## Importing an existing Minecraft server
+## Architecture
 
-From the dashboard choose **Import server** and upload a `.zip`, `.tar`, `.tar.gz`, or `.tgz` containing an existing server directory. BlockHost:
+```text
+Browser dashboard
+       │
+BlockHost control plane ── Docker Engine
+       │                     ├── Minecraft server A + volume
+       │                     ├── Minecraft server B + volume
+       │                     └── Proxy + private network
+       └── Auth / files / backups / metrics
+```
 
-- extracts the archive safely into a new isolated Docker volume
-- detects common server software (Vanilla, Paper, Spigot, Fabric, Forge, NeoForge, Velocity, Waterfall)
-- preserves worlds, `server.properties`, plugins, mods, configs and other files
-- reads the existing server port when available, otherwise allocates a free port
-- lets you choose RAM, CPU, port and max players
-- requires EULA confirmation when the imported server does not already contain `eula=true`
-- runs the imported server in its own BlockHost Docker container
+## Release evolution
 
-For large worlds, keep the browser open until the import completes. The current import upload limit is 8 GB.
+| Snapshot | Milestone |
+|---|---|
+| v1 | Initial Minecraft hosting panel |
+| v2 | Expanded hosting capabilities |
+| v3 | Automated Minecraft setup |
+| v4 | Broader hosting platform |
+| v5 | Multi-server platform |
+| v6 | Container-oriented self-hosted platform |
+| v6.1 | Import existing servers from archives |
+| **v6.2** | **Import existing Windows folders directly** |
 
-## Importing an existing Windows server folder
+The version tags are **reconstructed from preserved release ZIPs**, not the original development commits. See [HISTORY.md](HISTORY.md) for provenance.
 
-The Import Server workflow can now import a Minecraft server directly from an existing folder on Windows. You no longer need to create a ZIP or TAR archive first.
+## Documentation
 
-In the BlockHost web panel:
+- [Development history and provenance](HISTORY.md)
+- [Security considerations](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Original detailed product notes](docs/ORIGINAL_README.md)
 
-1. Select **Import server**.
-2. Choose **Existing folder** as the source type.
-3. Select the existing Minecraft server folder in the Windows folder picker.
-4. BlockHost uploads the folder contents while preserving the relative directory structure.
-5. BlockHost detects the server software, reads `server.properties`, checks `eula.txt`, allocates a port, and copies the server into its isolated Docker volume.
+## Project status
 
-The archive import option remains available for ZIP, TAR, TAR.GZ, and TGZ files.
+BlockHost is an evolving project. Test upgrades, backups, restores, and imports in a safe environment before relying on it for production servers.
