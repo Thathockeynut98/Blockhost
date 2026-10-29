@@ -104,7 +104,28 @@ app.post("/api/instances/:id/stop",auth,async(req,res)=>{const x=db.instances[re
 app.post("/api/instances/:id/restart",auth,async(req,res)=>{const x=db.instances[req.params.id];if(!x||!canAccess(req.user,x))return res.status(403).end();await stopContainer(x);try{res.json(await runContainer(x))}catch(e){res.status(500).json({error:e.message})}});
 app.post("/api/instances/:id/kill",auth,async(req,res)=>{const x=db.instances[req.params.id];if(!x||!canAccess(req.user,x))return res.status(403).end();await killContainer(x);res.json(x)});
 app.get("/api/status",auth,instanceAuth,async(req,res)=>{const x=req.instance;x.status=await statusOf(x);const st=await containerStats(x);res.json({instance:x,status:x.status,running:x.status==="running",metrics:{...st,tps:null,uptime:x.startedAt?Math.floor((now()-x.startedAt)/1000):0},limits:{memory:x.memory,cpu:x.cpu,disk:x.disk}})});
-app.get("/api/console",auth,instanceAuth,async(req,res)=>{try{const out=await docker(["logs","--tail","300",containerName(req.instance)]);res.json(out.split(/\r?\n/).filter(Boolean))}catch{res.json([])}});
+function readContainerLogs(name){
+ return new Promise((resolve,reject)=>{
+  const p=spawn("docker",["logs","--timestamps","--tail","300",name],{stdio:["ignore","pipe","pipe"]});
+  const chunks=[];let stderr="";let bytes=0;const maxBytes=1024*1024;
+  function collect(stream,isError){
+   stream.on("data",chunk=>{
+    if(isError)stderr+=chunk.toString();
+    if(bytes<maxBytes){chunks.push(chunk.toString().slice(0,maxBytes-bytes));bytes+=chunk.length;}
+   });
+  }
+  collect(p.stdout,false);collect(p.stderr,true);
+  p.on("error",reject);
+  p.on("close",code=>{
+   if(code!==0)return reject(new Error(stderr.trim()||"docker logs exited "+code));
+   resolve(chunks.join("").split(/\\r?\\n/).filter(Boolean).slice(-300));
+  });
+ });
+}
+app.get("/api/console",auth,instanceAuth,async(req,res)=>{
+ try{res.json(await readContainerLogs(containerName(req.instance)))}
+ catch(e){res.status(502).json({error:"Unable to retrieve Docker logs: "+e.message})}
+});
 app.post("/api/command",auth,instanceAuth,async(req,res)=>{const c=String(req.body.command||"").trim();if(!c)return res.status(400).end();try{await docker(["exec",containerName(req.instance),"rcon-cli",...c.split(/\s+/)]);res.json({ok:true})}catch(e){res.status(500).json({error:e.message})}});
 
 async function volumeCmd(x,args,input){await ensureVolume(x);const root=proxySoftware.has(x.software)?"/server":"/data";return docker(["run","--rm",...(input!==undefined?["-i"]:[]),"-v",`${volumeName(x.id)}:${root}`,"alpine","sh","-lc",args],{input})}
