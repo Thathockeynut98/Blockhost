@@ -190,6 +190,71 @@ app.post("/api/folder",auth,instanceAuth,async(req,res)=>{
  }catch(e){fileError(res,e)}
 });
 
+
+/* Download, rename and delete files from the selected Minecraft data volume. */
+function safeFileLocation(x,relative){
+ const rel=fileRelative(relative);
+ const root=vroot(x);
+ return {rel,root,full:root+"/"+rel};
+}
+function safeVolumeTarget(root,rel){
+ // Reject symlinks at any component, including the final path.
+ const pieces=rel.split("/");
+ let cmd="set -e; ";
+ let prefix=root;
+ for(const piece of pieces){
+  prefix+="/"+piece;
+  cmd+="test ! -L "+shellArg(prefix)+"; ";
+ }
+ return cmd;
+}
+app.get("/api/file/download",auth,instanceAuth,async(req,res)=>{
+ let child;
+ try{
+  const {rel,root,full}=safeFileLocation(req.instance,req.query.path);
+  const volume=volumeName(req.instance.id);
+  await ensureVolume(req.instance);
+  const isDir=(await volumeCmd(req.instance,safeVolumeTarget(root,rel)+"test -d "+shellArg(full)+" && echo yes || true")).trim()==="yes";
+  const filename=rel.split("/").at(-1)+(isDir?".tar.gz":"");
+  const safeName=filename.replace(/[^a-zA-Z0-9._-]/g,"_");
+  const command=safeVolumeTarget(root,rel)+"test -e "+shellArg(full)+"; "+
+   (isDir?"cd "+shellArg(root)+" && tar -czf - "+shellArg(rel):
+    "test -f "+shellArg(full)+" && cat "+shellArg(full));
+  res.setHeader("Content-Type",isDir?"application/gzip":"application/octet-stream");
+  res.setHeader("Content-Disposition",'attachment; filename="'+safeName+'"');
+  child=spawn("docker",["run","--rm","-v",volume+":"+root+":ro","alpine","sh","-lc",command],{stdio:["ignore","pipe","pipe"]});
+  let err="";
+  child.stderr.on("data",d=>err+=d.toString());
+  child.on("error",e=>{if(!res.headersSent)res.status(500).end(e.message);else res.destroy(e)});
+  child.on("close",code=>{if(code!==0){if(!res.headersSent)res.status(500).end(err||"Download failed");else res.destroy()}else res.end()});
+  child.stdout.pipe(res,{end:false});
+  res.on("close",()=>{if(!child.killed)child.kill()});
+ }catch(e){if(child)child.kill();if(!res.headersSent)fileError(res,e)}
+});
+app.post("/api/file/rename",auth,instanceAuth,async(req,res)=>{
+ try{
+  const {rel,root,full}=safeFileLocation(req.instance,req.body.path);
+  const name=String(req.body.newName||"");
+  if(!name||name==="."||name===".."||name.includes("/")||name.includes("\\")||/[\\x00-\\x1f]/.test(name))throw new Error("Invalid new name");
+  const parent=rel.split("/").slice(0,-1).join("/");
+  const next=(parent?parent+"/":"")+name;
+  const target=root+"/"+next;
+  const cmd=safeVolumeTarget(root,rel)+safeVolumeTarget(root,next)+
+   "test -e "+shellArg(full)+"; test ! -e "+shellArg(target)+"; mv "+shellArg(full)+" "+shellArg(target);
+  await volumeCmd(req.instance,cmd);
+  res.json({ok:true,path:next});
+ }catch(e){fileError(res,e)}
+});
+app.delete("/api/file",auth,instanceAuth,async(req,res)=>{
+ try{
+  const {rel,root,full}=safeFileLocation(req.instance,req.body?.path);
+  if(req.body?.confirm!==rel)throw new Error("Deletion confirmation does not match the selected path");
+  const cmd=safeVolumeTarget(root,rel)+"test -e "+shellArg(full)+"; rm -rf -- "+shellArg(full);
+  await volumeCmd(req.instance,cmd);
+  res.json({ok:true});
+ }catch(e){fileError(res,e)}
+});
+
 const upload=multer({dest:path.join(DATA,"uploads"),limits:{fileSize:8*1024*1024*1024}});
 const folderUpload=multer({dest:path.join(DATA,"folder-uploads"),limits:{fileSize:8*1024*1024*1024,files:100000}});
 function safeRelativeUploadPath(value){
