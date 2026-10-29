@@ -11,4 +11,5 @@ services:
     environment:
       PORT: 8080
       MC_PORT: 25565
+      CURSEFORGE_API_KEY: ${CURSEFORGE_API_KEY:-}
     restart: unless-stopped

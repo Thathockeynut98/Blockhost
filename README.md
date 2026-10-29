@@ -1,28 +1,36 @@
-# BlockHost v3 — Automatic Server Setup
+# BlockHost v4
 
-## New
-- Automatic setup UI for Paper, Spigot, Fabric, Forge and NeoForge.
-- Minecraft version selection.
-- One-click catalog addons for common plugins/mods.
-- Installation progress and live installer logs.
-- Paper and Spigot installation are wired to official/public project APIs/build tooling.
-- Fabric installation uses Fabric's metadata service.
-- Forge/NeoForge are represented in the installer catalog, with production-grade pinned-build installers intentionally left as the next integration because build URLs must be matched to the selected Minecraft version.
+A self-hosted Minecraft server control panel for friends.
+
+## What's new
+- Paper, Spigot, Fabric, Forge, NeoForge
+- Velocity and Waterfall proxy installation
+- Real automatic server JAR/installer downloads
+- Automatic Minecraft/server software detection
+- Modrinth search + one-click downloads
+- Optional CurseForge API integration + one-click downloads
+- Java 17/21 detection and automatic Java selection
+- Real host/container CPU, RAM, disk and network metrics
+- Local user accounts with password hashing and sessions
+- Roles: owner/admin/member
+- Public Invite Friends links with expiry and use limits
+- Per-user server access controls
+- Existing console/files/players/backups controls retained
 
 ## Run
 1. Install Docker Desktop.
-2. Put this project in a folder.
-3. Put a server JAR in `servers/main/server.jar` only if you want to keep an existing server; the setup page can replace it for supported installers.
-4. Run `docker compose up -d --build`.
-5. Open `http://localhost:8080`.
-6. Open **Server Setup**.
-7. Select software + Minecraft version.
-8. Click **Install / Switch Server**.
+2. Extract this project.
+3. From the project folder:
+   `docker compose up -d --build`
+4. Open http://localhost:8080
+5. The first account created becomes the owner.
 
-## Safety
-Stop the server before switching software. Back up the world before changing loaders or major versions.
+## CurseForge
+CurseForge's API requires an API key. Set:
+`CURSEFORGE_API_KEY=your_key`
+in a `.env` file next to docker-compose.yml, then rebuild/restart.
 
-Do not expose the dashboard publicly without authentication, HTTPS, CSRF protection, rate limiting, and authorization.
+## Important
+This is a self-hosted beta. Put it behind HTTPS/reverse proxy before exposing it to the public internet. Do not publish your CurseForge key. Minecraft EULA acceptance remains the operator's responsibility.
 
-## Next production step
-Use pinned official Forge/NeoForge installer coordinates, Modrinth/CurseForge APIs, compatibility checks, server-type detection, multiple server instances, authentication, and per-server isolation.
+The Modrinth integration uses their public API and downloads the selected version file. Their API documents version filtering by Minecraft version and loader. Paper/Velocity/Waterfall downloads use PaperMC's downloads service. Forge and NeoForge use their official installers. See the project documentation for the upstream services.

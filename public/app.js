@@ -1,54 +1,42 @@
-const $=x=>document.getElementById(x);let currentPath="",currentFile="";
-function openTab(id){document.querySelectorAll(".tab").forEach(x=>x.classList.add("hidden"));$(id).classList.remove("hidden");document.querySelectorAll(".nav").forEach(x=>x.classList.toggle("active",x.dataset.tab===id));$("heading").textContent=id==="mods"?"Mods & Plugins":id[0].toUpperCase()+id.slice(1);if(id==="files")refreshFiles();if(id==="players")loadPlayers();if(id==="backups")loadBackups();if(id==="mods")loadMods();}
-document.querySelectorAll(".nav").forEach(x=>x.onclick=()=>openTab(x.dataset.tab));
-async function api(u,o){let r=await fetch(u,o);return r.json()}
-function fmt(s){let h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h}h ${m}m`:`${m}m`}
-function mb(n){return (n/1048576).toFixed(0)+" MB"}
-function render(s){let on=s.running,m=s.metrics||{};$("power").textContent=on?"Stop Server":"Start Server";$("pill").textContent=on?"● Online":"● Offline";$("pill").className="pill "+(on?"on":"");$("status").textContent=on?"Online":"Offline";$("sideStatus").textContent=on?"Online":"Offline";$("sideDot").classList.toggle("on",on);$("uptime").textContent="Uptime "+fmt(m.uptime||0);$("serverName").textContent=s.settings.name;$("version").textContent=s.settings.version;$("tps").textContent=(m.tps||20).toFixed(1);$("cpu").textContent=(m.cpu||0)+"%";$("ram").textContent=mb(m.ram||0);$("disk").textContent=mb(m.disk||0);$("net").textContent=(((m.rx||0)+(m.tx||0))/1024).toFixed(1)+" KB/s";$("players").textContent=s.players.length+" / "+s.settings.maxPlayers;$("tpsval").textContent=(m.tps||20).toFixed(1);$("cpuval").textContent=(m.cpu||0)+"%";$("ramval").textContent=mb(m.ram||0);$("diskval").textContent=mb(m.disk||0);$("tpsbar").style.width=((m.tps||20)/20*100)+"%";$("cpubar").style.width=Math.min(100,m.cpu||0)+"%";$("rambar").style.width=Math.min(100,(m.ram||0)/10485760*100)+"%";$("diskbar").style.width=Math.min(100,(m.disk||0)/1073741824*100)+"%";$("consoleState").textContent=on?"Connected":"Disconnected";}
-async function refresh(){render(await api("/api/status"));let c=await api("/api/console");$("log").textContent=c.join("\n");$("log").scrollTop=$("log").scrollHeight}
-async function togglePower(){let s=await api("/api/status");await api(s.running?"/api/stop":"/api/start",{method:"POST"});setTimeout(refresh,500)}
-async function restart(){await api("/api/restart",{method:"POST"});setTimeout(refresh,500)}
-async function sendCmd(c){if(typeof c!=="string"){c=$("command").value;$("command").value=""}if(c)await api("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({command:c})})}
-$("command").onkeydown=e=>{if(e.key==="Enter")sendCmd()};
-async function refreshFiles(){let a=await api("/api/files?path="+encodeURIComponent(currentPath));$("fileList").innerHTML=(currentPath?`<div class="file" onclick="goUp()">↩ ..</div>`:"")+a.map(f=>`<div class="file" onclick="${f.type==="dir"?`enter('${encodeURIComponent(f.path)}')`:`openFile('${encodeURIComponent(f.path)}')`}"><b>${f.type==="dir"?"📁":"📄"} ${esc(f.name)}</b><small>${f.type==="dir"?"folder":f.size+" bytes"}</small></div>`).join("")}
-function esc(x){return x.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
-function enter(p){currentPath=decodeURIComponent(p);refreshFiles()}function goUp(){currentPath=currentPath.split("/").slice(0,-1).join("/");refreshFiles()}
-async function openFile(p){currentFile=decodeURIComponent(p);$("editor").classList.remove("hidden");$("editName").textContent=currentFile;$("edit").value=await fetch("/api/file?path="+encodeURIComponent(currentFile)).then(r=>r.text())}
-async function saveEdit(){await api("/api/file",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:currentFile,content:$("edit").value})});alert("Saved")}
-async function newFolder(){let n=prompt("Folder name");if(n)await api("/api/folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:(currentPath?currentPath+"/":"")+n})});refreshFiles()}
-async function upload(file){if(!file)return;let f=new FormData();f.append("file",file);f.append("path",currentPath);await fetch("/api/upload",{method:"POST",body:f});refreshFiles()}
-async function loadPlayers(){let d=await api("/api/players");$("playerSummary").textContent=d.players.length+" online";$("playerRows").innerHTML=d.known.map(p=>`<div class="player"><span>● ${esc(p.name)} <small>${p.uuid||"UUID unavailable"}</small></span><span><button onclick="playerAction('${esc(p.name)}','op')">OP</button><button onclick="playerAction('${esc(p.name)}','deop')">De-OP</button><button onclick="playerAction('${esc(p.name)}','kick')">Kick</button><button onclick="playerAction('${esc(p.name)}','ban')">Ban</button><button onclick="playerAction('${esc(p.name)}','whitelist')">Whitelist</button></span></div>`).join("")||"<p>No players seen yet.</p>";$("activity").innerHTML=d.activity.map(x=>`<div>${new Date(x.time).toLocaleString()} — <b>${esc(x.name)}</b> — ${esc(x.action)}</div>`).join("")||"No activity yet."}
-async function playerAction(name,action){await api("/api/player/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,action})});loadPlayers()}
-async function backup(){let r=await api("/api/backup",{method:"POST"});if(r.ok)alert("Backup created.");loadBackups()}
-async function loadBackups(){let a=await api("/api/backups");$("backupRows").innerHTML=a.length?a.slice().reverse().map(b=>`<div class="backup"><span>${new Date(b.time).toLocaleString()} · ${mb(b.size)}</span><span><a href="/api/backup/download?id=${encodeURIComponent(b.id)}"><button>Download</button></a><button onclick="restore('${b.id}')">Restore</button><button onclick="deleteBackup('${b.id}')">Delete</button></span></div>`).join(""):"<p class='note'>No backups yet.</p>";let s=await api("/api/status");$("backupEnabled").checked=s.settings.backupEnabled;$("backupMinutes").value=s.settings.backupMinutes}
-async function restore(id){if(confirm("Restore this backup? Stop the server first."))await api("/api/backup/restore",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})})}
-async function deleteBackup(id){await api("/api/backup?id="+encodeURIComponent(id),{method:"DELETE"});loadBackups()}
-async function saveBackupSettings(){await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({backupEnabled:$("backupEnabled").checked,backupMinutes:+$("backupMinutes").value})})}
-async function loadMods(){let a=await api("/api/mods");$("modRows").innerHTML=a.map(m=>`<div class="backup"><span><b>${esc(m.name)}</b> · ${esc(m.type)}<br><small>${esc(m.url||"No URL")}</small></span><button onclick="delMod('${m.id}')">Remove</button></div>`).join("")||"<p class='note'>No mods/plugins in library.</p>"}
-async function addMod(){await api("/api/mods",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("modName").value,type:$("modType").value,url:$("modUrl").value})});$("modName").value="";$("modUrl").value="";loadMods()}
-async function delMod(id){await fetch("/api/mods/"+id,{method:"DELETE"});loadMods()}
-async function loadSettings(){let s=await api("/api/settings");$("setName").value=s.name;$("setMax").value=s.maxPlayers;$("auto").checked=s.autoRestart;$("restartMin").value=s.restartMinutes}
-async function saveSettings(){await api("/api/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("setName").value,maxPlayers:+$("setMax").value,autoRestart:$("auto").checked,restartMinutes:+$("restartMin").value})});refresh()}
-async function openProperties(){$("propPanel").classList.remove("hidden");$("properties").value=(await api("/api/server-properties")).content}
-async function saveProperties(){await api("/api/server-properties",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:$("properties").value})});alert("server.properties saved")}
-
-async function loadInstaller(){
- let cat=await api("/api/installer/catalog"); let types=Object.keys(cat);
- $("software").innerHTML=types.map(x=>`<option>${x}</option>`).join("");
- function versions(){let x=cat[$("software").value].versions;$("mcVersion").innerHTML=x.map(v=>`<option>${v}</option>`).join("");loadAddons()}
- $("software").onchange=versions; versions(); loadAddons();
-}
-async function installServer(){
- let software=$("software").value,version=$("mcVersion").value;
- if(!confirm(`Install ${software} ${version}? Stop the server first.`))return;
- let r=await api("/api/installer/install",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({software,version})});
- if(!r.ok)alert(r.error);
-}
-async function loadAddons(){
- let a=await api("/api/addons/catalog"),s=await api("/api/status"),platform=$("software").value;
- $("addonPlatform").textContent=platform;
- $("addonRows").innerHTML=a.filter(x=>x.platforms.includes(platform)).map(x=>`<div class="backup"><span><b>${esc(x.name)}</b> · ${esc(x.kind)}<br><small>${esc(x.description)}</small></span><button onclick="installAddon('${x.id}')">Install</button></div>`).join("")||"<p class='note'>No catalog addons for this server type.</p>";
-}
-async function installAddon(id){let r=await api("/api/addons/install",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});alert(r.ok?r.message:r.error)}
-
-const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>{let d=JSON.parse(e.data);if(d.type==="metrics")refresh(); if(d.type==="installer"){ $("installState").textContent=d.stage; $("installBar").style.width=d.progress+"%"; $("installMessage").textContent=d.message; $("installLog").textContent=(d.logs||[]).join("\n"); $("installLog").scrollTop=$("installLog").scrollHeight; if(d.stage==="complete")refresh()}if(d.type==="console"){ $("log").textContent+=($("log").textContent?"\n":"")+d.line;$("log").scrollTop=$("log").scrollHeight}if(d.type==="status")refresh()};refresh();loadSettings();loadInstaller();setInterval(refresh,5000);
+let TOKEN=localStorage.getItem("blockhost_token")||"",ME=null,ws=null,currentFile="";
+const $=id=>document.getElementById(id);
+async function raw(url,opt={}){opt.headers={...(opt.headers||{}),...(TOKEN?{Authorization:"Bearer "+TOKEN}:{})};const r=await fetch(url,opt);let j=null;try{j=await r.json()}catch{}if(r.status===401){logout();throw new Error("Please sign in")}if(!r.ok)throw new Error(j?.error||"Request failed");return j}
+async function api(url,method="GET",body){return raw(url,{method,headers:body?{"Content-Type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined})}
+async function login(){try{const j=await raw("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("user").value,password:$("pass").value})});TOKEN=j.token;localStorage.setItem("blockhost_token",TOKEN);boot()}catch(e){$("authMsg").textContent=e.message}}
+async function register(){try{const j=await raw("/api/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("user").value,password:$("pass").value})});TOKEN=j.token;localStorage.setItem("blockhost_token",TOKEN);boot()}catch(e){$("authMsg").textContent=e.message}}
+async function boot(){try{ME=await raw("/api/auth/me");$("auth").classList.add("hidden");$("app").classList.remove("hidden");$("who").textContent=`${ME.username} · ${ME.role}`;connect();load();if(location.pathname.startsWith("/invite/")){const id=location.pathname.split("/").pop();setTimeout(()=>acceptInvite(id,new URLSearchParams(location.search).get("key")),500)}}catch{localStorage.removeItem("blockhost_token")}}
+function logout(){TOKEN="";localStorage.removeItem("blockhost_token");location.reload()}
+function connect(){ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="console"){appendConsole(m.line)}if(m.type==="consoleHistory")m.lines.forEach(appendConsole);if(m.type==="metrics")metrics(m);if(m.type==="status")status(m.running);if(m.type==="players"){$("playersCount").textContent=m.players.length;renderPlayers(m.players)}}}
+function appendConsole(x){for(const id of ["console","dashConsole"]){const el=$(id);if(el){el.textContent+=(el.textContent?"\n":"")+x;el.scrollTop=el.scrollHeight}}}
+function metrics(m){$("cpu").textContent=m.cpu+"%";$("cpuBar").style.width=m.cpu+"%";$("ram").textContent=Math.round(m.ram/1048576)+" MB";$("disk").textContent=Math.round(m.disk/1048576)+" MB";$("net").textContent=Math.round((m.rx+m.tx)/1024)+" KB/s"}
+function status(r){$("status").textContent=r?"Online":"Offline"}
+async function load(){try{const s=await raw("/api/status");$("serverName").textContent=s.settings.name;$("version").textContent=s.detectedVersion;$("software").textContent=s.settings.software;$("playersCount").textContent=s.players.length;settings(s.settings);await setup();await installed();await backups();await users();}catch(e){console.error(e)}}
+function tab(id){document.querySelectorAll(".tab").forEach(x=>x.classList.add("hidden"));$(id).classList.remove("hidden");if(id==="files")listFiles();if(id==="players")loadPlayers()}
+async function setup(){const c=await raw("/api/installer/catalog");$("soft").innerHTML=c.software.map(x=>`<option>${x}</option>`).join("");$("ver").innerHTML=c.versions.map(x=>`<option>${x}</option>`).join("");detect()}
+async function detect(){const d=await raw("/api/installer/detect");$("detectOut").textContent=`Detected: ${d.software} ${d.version} · Java ${d.java}`;$("version").textContent=d.version}
+async function installServer(){try{await api("/api/installer/install","POST",{software:$("soft").value,version:$("ver").value});$("installLog").textContent="Installation complete. Refreshing…";load()}catch(e){$("installLog").textContent=e.message}}
+async function searchMods(){const q=encodeURIComponent($("modq").value),loader=$("loader").value,g=encodeURIComponent($("version").textContent);try{const j=await raw(`/api/mods/search?q=${q}&loader=${loader}&gameVersion=${g}`);$("modResults").innerHTML=(j.hits||[]).map(x=>`<div class="card result"><div><h3>${x.title}</h3><p>${x.description||""}</p><small>${x.project_type||""} · ${x.downloads||0} downloads</small></div><button onclick="installMod('${x.project_id}','${loader}','${g}')">Install</button></div>`).join("")||"<p class=muted>No results.</p>"}catch(e){$("modResults").textContent=e.message}}
+async function installMod(p,l,g){try{await api("/api/mods/install","POST",{project:p,loader:l,gameVersion:decodeURIComponent(g)});installed()}catch(e){alert(e.message)}}
+async function searchCF(){try{const j=await raw(`/api/curseforge/search?q=${encodeURIComponent($("modq").value)}&gameVersion=${encodeURIComponent($("version").textContent)}`);$("modResults").innerHTML=(j.data||[]).map(x=>`<div class="card result"><div><h3>${x.name}</h3><p>${x.summary||""}</p></div><button onclick="installCF(${x.id})">Install</button></div>`).join("")||"<p class=muted>No results.</p>"}catch(e){$("modResults").textContent=e.message}}
+async function installCF(id){try{await api("/api/curseforge/install","POST",{id,gameVersion:$("version").textContent});installed()}catch(e){alert(e.message)}}
+async function installed(){try{const j=await raw("/api/addons/installed");$("installed").innerHTML=j.map(x=>`<div class=file><span>${x.source}: ${x.file}</span><span>${x.gameVersion||x.version||""}</span></div>`).join("")||"<span class=muted>Nothing installed through the panel yet.</span>"}catch{}}
+function sendCmd(){api("/api/command","POST",{command:$("cmd").value});$("cmd").value=""}
+async function listFiles(){const j=await raw("/api/files?path=");$("fileList").innerHTML=j.map(x=>`<div class=file><a onclick="${x.type==="dir"?`openDir('${x.path}')`:`openText('${x.path}')`}">${x.type==="dir"?"📁 ":"📄 "}${x.name}</a><span>${x.size||""}</span></div>`).join("")}
+async function openDir(p){const j=await raw("/api/files?path="+encodeURIComponent(p));$("fileList").innerHTML=`<div class=file><a onclick="listFiles()">⬅ root</a></div>`+j.map(x=>`<div class=file><a onclick="${x.type==="dir"?`openDir('${x.path}')`:`openText('${x.path}')`}">${x.type==="dir"?"📁 ":"📄 "}${x.name}</a><span>${x.size||""}</span></div>`).join("")}
+async function openText(p){try{$("filePath").value=p;currentFile=p;$("editor").value=await (await fetch("/api/file?path="+encodeURIComponent(p),{headers:{Authorization:"Bearer "+TOKEN}})).text()}catch(e){alert(e.message)}}
+async function openFile(){openText($("filePath").value)}
+async function saveFile(){await api("/api/file","PUT",{path:currentFile||$("filePath").value,content:$("editor").value});alert("Saved")}
+async function newFolder(){const p=prompt("Folder path");if(p){await api("/api/folder","POST",{path:p});listFiles()}}
+async function uploadFile(){const f=$("fileUpload").files[0];if(!f)return;const fd=new FormData();fd.append("file",f);fd.append("path","");await raw("/api/upload",{method:"POST",body:fd});listFiles()}
+async function loadPlayers(){const j=await raw("/api/players");renderPlayers(j.players)}
+function renderPlayers(ps){$("playerList").innerHTML=ps.map(p=>`<div class=file><span>${p.name}</span><span><button onclick="playerAction('${p.name}','op')">OP</button> <button class=ghost onclick="playerAction('${p.name}','kick')">Kick</button> <button class=danger onclick="playerAction('${p.name}','ban')">Ban</button></span></div>`).join("")||"<p class=muted>No players online.</p>"}
+async function playerAction(n,a){await api("/api/player/action","POST",{name:n,action:a});loadPlayers()}
+async function backup(){await api("/api/backup","POST");backups()}
+async function backups(){const j=await raw("/api/backups");$("backupList").innerHTML=j.map(x=>`<div class=file><span>${x.file}</span><span><a href="/api/backup/download?id=${encodeURIComponent(x.id)}" target=_blank>Download</a></span></div>`).join("")||"<p class=muted>No backups.</p>"}
+async function invite(){const j=await api("/api/invites","POST",{hours:Number($("invHours").value),maxUses:Number($("invUses").value)});$("inviteOut").innerHTML=`<div class=invite>${location.origin}${j.link}</div>`}
+async function acceptInvite(id,key){try{await api(`/api/invites/${id}/accept`,"POST",{key});alert("Invite accepted. You now have access to the server.")}catch(e){alert(e.message)}}
+function settings(s){$("setName").value=s.name||"";$("setMax").value=s.maxPlayers||20;$("setAuto").checked=!!s.autoRestart}
+async function saveSettings(){await api("/api/settings","PUT",{name:$("setName").value,maxPlayers:Number($("setMax").value),autoRestart:$("setAuto").checked});load()}
+async function users(){if(!ME||!["owner","admin"].includes(ME.role))return;$("adminBox").classList.remove("hidden");const j=await raw("/api/users");$("users").innerHTML=j.map(x=>`<div class=file><span>${x.username} · ${x.role}</span><span>${x.id===ME.id?"you":`<button onclick="role('${x.id}','admin')">Admin</button>`}</span></div>`).join("")}
+async function role(id,r){await api("/api/users/"+id+"/role","POST",{role:r});users()}
+if(TOKEN)boot();
