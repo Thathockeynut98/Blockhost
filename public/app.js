@@ -8,17 +8,40 @@ async function boot(){try{ME=await raw('/api/auth/me');$('auth').classList.add('
 function logout(){TOKEN='';localStorage.removeItem('blockhost_token');location.reload()}
 async function load(){await loadInstances();await refresh();await loadSetup();await loadBackups();await loadSchedules();await loadUsers();if(dbTab==='proxy')loadBackends()}
 async function loadInstances(){const xs=await raw('/api/instances');if(!xs.length)return;$('instanceSelect').innerHTML=xs.map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.type)}</option>`).join('');if(!xs.some(x=>x.id===INSTANCE))INSTANCE=xs[0].id;localStorage.setItem('blockhost_instance',INSTANCE);$('instanceSelect').value=INSTANCE}
-async function switchInstance(id){if(settingsDirty&&!confirm('Discard unsaved Minecraft settings?'))return;INSTANCE=id;localStorage.setItem('blockhost_instance',id);await refresh();if(dbTab==='settings')loadMinecraftSettings()}
+async function switchInstance(id){if(settingsDirty&&!confirm('Discard unsaved Minecraft settings?'))return;INSTANCE=id;localStorage.setItem('blockhost_instance',id);await refresh();if(dbTab==='settings')loadMinecraftSettings();if(dbTab==='console')refreshConsole(true)}
 async function refresh(){const s=await raw('/api/status');const x=s.instance;$('hero').innerHTML=`<div class="eyebrow">${esc(x.type)} SERVER</div><h2>${esc(x.name)}</h2><p>${esc(x.software)} · Minecraft ${esc(x.version)} · ${x.memory} MB RAM · ${x.cpu} CPU · public port ${x.port}</p><span class="pill">Docker: ${esc(x.container||'not created')}</span>`;$('status').textContent=s.status;$('playersCount').textContent='—';$('cpu').textContent=s.metrics.cpu.toFixed(1)+'%';$('cpuLimit').textContent='limit '+x.cpu+' CPU';$('ram').textContent=Math.round(s.metrics.ram/1048576)+' MB';$('ramLimit').textContent='limit '+x.memory+' MB';$('net').textContent=Math.round((s.metrics.rx+s.metrics.tx)/1024)+' KB/s';$('port').textContent=x.port;$('containerName').textContent=x.container||'—';$('cpuBar').style.width=Math.min(100,s.metrics.cpu/Math.max(.1,x.cpu*100)*100)+'%';$('installRam').value=x.memory;$('installCpu').value=x.cpu;$('setName').value=x.name;$('setPort').value=x.port;$('setRam').value=x.memory;$('setCpu').value=x.cpu;$('setMax').value=x.maxPlayers||20;$('setMode').value=x.gamemode||'survival';try{const c=await raw('/api/console');$('dashConsole').textContent=c.slice(-60).join('\n')}catch{}} 
 async function serverAction(a){try{await api(`/api/instances/${INSTANCE}/${a}`,'POST');setTimeout(refresh,500)}catch(e){alert(e.message)}}
-let dbTab='dashboard';function tab(id){dbTab=id;document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='files')listFiles();if(id==='backups')loadBackups();if(id==='schedules')loadSchedules();if(id==='proxy')loadBackends();if(id==='players')loadPlayers();if(id==='settings')loadMinecraftSettings()}
+let dbTab='dashboard';function tab(id){if(dbTab==='console')stopConsolePolling();dbTab=id;document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='files')listFiles();if(id==='backups')loadBackups();if(id==='schedules')loadSchedules();if(id==='proxy')loadBackends();if(id==='players')loadPlayers();if(id==='settings')loadMinecraftSettings();if(id==='console')startConsolePolling()}
 async function loadSetup(){const c=await raw('/api/installer/catalog');$('soft').innerHTML=c.software.map(x=>`<option>${x}</option>`).join('');$('ver').innerHTML=c.versions.map(x=>`<option>${x}</option>`).join('');const s=await raw('/api/status');$('soft').value=s.instance.software;$('ver').value=s.instance.version;$('templateInfo').textContent=templatesText(s.instance.template)}
 function templatesText(t){return ({survival:'Survival · Paper · 4GB · 2 CPU',creative:'Creative · Paper · 3GB · 2 CPU',modded:'Modded · Fabric · 6GB · 4 CPU',proxy:'Proxy · Velocity · 2GB · 1 CPU',vanilla:'Vanilla · Vanilla · 3GB · 2 CPU'})[t]||'Custom server'}
 async function applyInstall(){try{await api(`/api/instances/${INSTANCE}`,'PUT',{software:$('soft').value,version:$('ver').value,memory:Number($('installRam').value),cpu:Number($('installCpu').value)});await serverAction('start')}catch(e){alert(e.message)}}
 async function listFiles(p=''){const j=await raw('/api/files?path='+encodeURIComponent(p));$('fileList').innerHTML=(p?`<div class=file><a onclick="listFiles('')">← root</a></div>`:'')+j.map(x=>`<div class=file><a onclick="${x.type==='dir'?`listFiles('${escAttr(x.path)}')`:`openText('${escAttr(x.path)}')`}">${x.type==='dir'?'📁':'📄'} ${esc(x.name)}</a><span>${x.size?formatBytes(x.size):''}</span></div>`).join('')}
 async function openText(p){currentFile=p;$('filePath').value=p;const r=await fetch('/api/file?path='+encodeURIComponent(p),{headers:{Authorization:'Bearer '+TOKEN,'X-Instance-Id':INSTANCE}});$('editor').value=await r.text()}
 async function openFile(){openText($('filePath').value)}async function saveFile(){await api('/api/file','PUT',{path:currentFile||$('filePath').value,content:$('editor').value});alert('Saved')}async function newFolder(){const p=prompt('Folder path');if(p){await api('/api/folder','POST',{path:p});listFiles()}}async function uploadFile(){const f=$('fileUpload').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);fd.append('path','');await raw('/api/upload',{method:'POST',body:fd});listFiles()}
-async function sendCmd(){const c=$('cmd').value.trim();if(!c)return;await api('/api/command','POST',{command:c});$('cmd').value='';const lines=await raw('/api/console');$('console').textContent=lines.join('\n')}
+let consolePollTimer=null,consoleFetching=false,consoleInstance='';
+async function refreshConsole(force=false){
+ const output=$('consoleOutput');if(!output||consoleFetching||!INSTANCE)return;
+ consoleFetching=true;
+ try{
+  const instance=INSTANCE;
+  const lines=await raw('/api/console');
+  if(instance!==INSTANCE)return;
+  const content=lines.length?lines.join('\\n'):'No container logs yet. Start the server or check its status in Overview.';
+  if(force||output.textContent!==content){
+   output.textContent=content;
+   if($('consoleAutoScroll')?.checked)output.scrollTop=output.scrollHeight;
+  }
+  $('consoleState').textContent='Logs updated · '+new Date().toLocaleTimeString()+' · '+lines.length+' lines';
+ }catch(e){output.textContent='Unable to read Minecraft logs: '+e.message;$('consoleState').textContent='Console error';}
+ finally{consoleFetching=false;}
+}
+function stopConsolePolling(){if(consolePollTimer){clearInterval(consolePollTimer);consolePollTimer=null;}}
+function startConsolePolling(){stopConsolePolling();refreshConsole(true);consolePollTimer=setInterval(()=>{if(dbTab==='console'&&!document.hidden)refreshConsole()},2000);}
+async function sendCmd(){
+ const c=$('cmd').value.trim();if(!c)return;
+ try{await api('/api/command','POST',{command:c});$('cmd').value='';setTimeout(()=>refreshConsole(true),500)}
+ catch(e){alert('Command failed: '+e.message);refreshConsole(true)}
+}
 async function loadPlayers(){const names=await raw('/api/console');$('playerList').innerHTML='<p class=muted>Use the console to run <code>list</code> for the current player count. Full player actions remain available through RCON commands.</p>'}
 async function searchMods(){const j=await raw('/api/mods/search?q='+encodeURIComponent($('modq').value)).catch(()=>null);if(!j){$('modResults').innerHTML='<div class=card>Modrinth search is available in the next integration module.</div>';return}$('modResults').innerHTML=(j.hits||[]).map(x=>`<div class="card result"><div><b>${esc(x.title)}</b><p>${esc(x.description||'')}</p></div><button onclick="installMod('${x.project_id}')">Install</button></div>`).join('')}
 async function installMod(id){alert('Install endpoint can be enabled for this instance after selecting its loader.')} 
