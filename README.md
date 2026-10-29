@@ -56,3 +56,17 @@ From the dashboard choose **Import server** and upload a `.zip`, `.tar`, `.tar.g
 - runs the imported server in its own BlockHost Docker container
 
 For large worlds, keep the browser open until the import completes. The current import upload limit is 8 GB.
+
+## Importing an existing Windows server folder
+
+The Import Server workflow can now import a Minecraft server directly from an existing folder on Windows. You no longer need to create a ZIP or TAR archive first.
+
+In the BlockHost web panel:
+
+1. Select **Import server**.
+2. Choose **Existing folder** as the source type.
+3. Select the existing Minecraft server folder in the Windows folder picker.
+4. BlockHost uploads the folder contents while preserving the relative directory structure.
+5. BlockHost detects the server software, reads `server.properties`, checks `eula.txt`, allocates a port, and copies the server into its isolated Docker volume.
+
+The archive import option remains available for ZIP, TAR, TAR.GZ, and TGZ files.
