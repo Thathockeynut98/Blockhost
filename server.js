@@ -64,7 +64,7 @@ async function statusOf(x){const c=await containerInspect(x);if(!c)return "stopp
 async function updateStatus(x){x.status=await statusOf(x);x.updatedAt=now();return x.status}
 async function allocPort(requested){const used=new Set(Object.values(db.instances).map(x=>x.port));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25565,Number(db.settings.nextPort)||25565);while(used.has(p))p++;db.settings.nextPort=p+1;return p}
 async function allocRcon(requested){const used=new Set(Object.values(db.instances).map(x=>x.rconPort));if(requested&&Number.isInteger(Number(requested))&&!used.has(Number(requested)))return Number(requested);let p=Math.max(25575,Number(db.settings.nextRconPort)||25575);while(used.has(p))p++;db.settings.nextRconPort=p+1;return p}
-function envArgs(x){const e=["--env","EULA=TRUE","--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`,"--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);if(x.maxPlayers)e.push("--env",`MAX_PLAYERS=${x.maxPlayers}`);if(x.gamemode)e.push("--env",`MODE=${x.gamemode}`)}return e}
+function envArgs(x){const e=["--env",`EULA=${x.eulaAccepted===false?"FALSE":"TRUE"}`,"--env",`MEMORY=${x.memory}M`];if(proxySoftware.has(x.software)){e.push("--env",`TYPE=${x.software.toUpperCase()}`,"--env",`SERVER_PORT=${x.port}`);if(x.software==="Velocity")e.push("--env","VELOCITY_VERSION=latest");else e.push("--env","WATERFALL_VERSION=latest");}else{if(x.imported&&x.jar){e.push("--env","TYPE=CUSTOM","--env",`CUSTOM_SERVER=/data/${x.jar.replaceAll("'","'")}`)}else{e.push("--env",`TYPE=${softwareType[x.software]||"VANILLA"}`,"--env",`VERSION=${x.version}`);}e.push("--env",`SERVER_PORT=25565`,`--env`,`ONLINE_MODE=${x.proxyBackend?"FALSE":"TRUE"}`);e.push("--env","ENABLE_RCON=true", "--env",`RCON_PORT=25575`,"--env",`RCON_PASSWORD=${x.rconPassword}`);if(x.maxPlayers)e.push("--env",`MAX_PLAYERS=${x.maxPlayers}`);if(x.gamemode)e.push("--env",`MODE=${x.gamemode}`)}return e}
 async function runContainer(x){await ensureNetwork();await ensureVolume(x);const old=await containerInspect(x);if(old)await docker(["rm","-f",containerName(x.id)]).catch(()=>{});
   const args=["run","-d","--name",containerName(x.id),"--network",db.settings.network,"--restart","unless-stopped","--cpus",String(x.cpu),"--memory",`${x.memory}m`,`--memory-swap`,`${x.memory}m`,`-p`,`${x.port}:${x.software==="Waterfall"?25577:25565}/tcp`];
   if(!proxySoftware.has(x.software))args.push("-p",`${x.rconPort}:25575/tcp`);
@@ -109,7 +109,61 @@ app.post("/api/command",auth,instanceAuth,async(req,res)=>{const c=String(req.bo
 async function volumeCmd(x,args,input){await ensureVolume(x);const root=proxySoftware.has(x.software)?"/server":"/data";return docker(["run","--rm",...(input!==undefined?["-i"]:[]),"-v",`${volumeName(x.id)}:${root}`,"alpine","sh","-lc",args],{input})}
 function vroot(x){return proxySoftware.has(x.software)?"/server":"/data"}
 function vpath(x,p){const s=String(p||"").replaceAll("\\","/").replace(/^\/+/,"");if(s.includes(".."))return null;return `${vroot(x)}/${s}`}
-const upload=multer({dest:path.join(DATA,"uploads")});
+const upload=multer({dest:path.join(DATA,"uploads"),limits:{fileSize:8*1024*1024*1024}});
+
+function detectImportedSoftware(root){
+  const names=fs.readdirSync(root,{withFileTypes:true}).map(x=>x.name.toLowerCase());
+  if(fs.existsSync(path.join(root,"velocity.toml")))return "Velocity";
+  if(fs.existsSync(path.join(root,"waterfall.yml"))||fs.existsSync(path.join(root,"bungee.yml")))return "Waterfall";
+  if(names.some(n=>n.includes("neoforge"))||fs.existsSync(path.join(root,"user_jvm_args.txt"))&&fs.existsSync(path.join(root,"libraries")))return "NeoForge";
+  if(names.some(n=>n.includes("forge"))||fs.existsSync(path.join(root,"libraries","net","minecraftforge")))return "Forge";
+  if(fs.existsSync(path.join(root,"fabric-server-launch.jar"))||fs.existsSync(path.join(root,"libraries","net","fabricmc")))return "Fabric";
+  if(names.some(n=>n.startsWith("paper")&&n.endsWith(".jar")))return "Paper";
+  if(names.some(n=>n.startsWith("spigot")&&n.endsWith(".jar")))return "Spigot";
+  return "Vanilla";
+}
+function findImportRoot(base){
+  const hasServerFile=(d)=>{const n=fs.readdirSync(d,{withFileTypes:true}).map(x=>x.name.toLowerCase());return n.includes("server.properties")||n.some(x=>x.endsWith(".jar"))||n.includes("velocity.toml")||n.includes("waterfall.yml")||n.includes("bungee.yml")};
+  if(hasServerFile(base))return base;
+  const dirs=fs.readdirSync(base,{withFileTypes:true}).filter(x=>x.isDirectory()).map(x=>path.join(base,x.name));
+  const candidate=dirs.find(hasServerFile);
+  return candidate||base;
+}
+function parseImportedProperties(root){
+  const out={};const f=path.join(root,"server.properties");if(!fs.existsSync(f))return out;
+  for(const line of fs.readFileSync(f,"utf8").split(/\r?\n/)){if(!line||line.startsWith("#"))continue;const i=line.indexOf("=");if(i<1)continue;out[line.slice(0,i).trim()]=line.slice(i+1).trim()}
+  return out;
+}
+async function copyDirectoryToVolume(x,src){
+  await ensureVolume(x);
+  return new Promise((resolve,reject)=>{
+    const tar=spawn("tar",["-cf","-","-C",src,"."]);const dockerP=spawn("docker",["run","--rm","-i","-v",`${volumeName(x.id)}:/data`,"alpine","tar","-xf","-","-C","/data"],{stdio:["pipe","pipe","pipe"]});
+    let err="";tar.stderr.on("data",d=>err+=d);dockerP.stderr.on("data",d=>err+=d);tar.stdout.pipe(dockerP.stdin);
+    let done=false;const finish=(e)=>{if(done)return;done=true;e?reject(e):resolve()};tar.on("error",finish);dockerP.on("error",finish);tar.on("close",c=>{if(c!==0)finish(new Error(err||`tar exited ${c}`));else dockerP.stdin.end()});dockerP.on("close",c=>{if(c!==0)finish(new Error(err||`docker import exited ${c}`));else finish()});
+  });
+}
+app.post("/api/instances/import",auth,admin,upload.single("archive"),async(req,res)=>{
+  if(!req.file)return res.status(400).json({error:"Choose a .zip, .tar, or .tar.gz server archive."});
+  const temp=path.join(DATA,"imports",crypto.randomUUID());fs.mkdirSync(temp,{recursive:true});
+  try{
+    const name=req.file.originalname.toLowerCase();
+    if(name.endsWith(".zip"))await new Promise((resolve,reject)=>execFile("unzip",["-q",req.file.path,"-d",temp],e=>e?reject(e):resolve()));
+    else if(name.endsWith(".tar.gz")||name.endsWith(".tgz"))await new Promise((resolve,reject)=>execFile("tar",["-xzf",req.file.path,"-C",temp],e=>e?reject(e):resolve()));
+    else if(name.endsWith(".tar"))await new Promise((resolve,reject)=>execFile("tar",["-xf",req.file.path,"-C",temp],e=>e?reject(e):resolve()));
+    else throw new Error("Unsupported archive. Use ZIP, TAR, or TAR.GZ.");
+    const root=findImportRoot(temp);const detected=detectImportedSoftware(root);const props=parseImportedProperties(root);
+    const software=["Velocity","Waterfall","Paper","Spigot","Fabric","Forge","NeoForge","Vanilla"].includes(req.body.software)?req.body.software:detected;
+    const id=idify(req.body.id||req.body.name||path.basename(req.file.originalname).replace(/\.(zip|tar|gz|tgz)$/gi,""));if(db.instances[id])throw new Error("That server ID already exists");
+    const port=await allocPort(req.body.port||props["server-port"]);const rconPort=await allocRcon(req.body.rconPort);const eulaFile=path.join(root,"eula.txt");const existingEula=fs.existsSync(eulaFile)&&/eula\s*=\s*true/i.test(fs.readFileSync(eulaFile,"utf8"));const accepted=existingEula||String(req.body.acceptEula)==="true";
+    if(!accepted)throw new Error("This server does not contain an accepted eula.txt. Confirm the Minecraft EULA in the import dialog.");
+    if(!existingEula)fs.writeFileSync(eulaFile,"# Generated by BlockHost\neula=true\n");
+    let jar=fs.readdirSync(root).find(n=>n.toLowerCase().endsWith(".jar"));if(!jar&&!proxySoftware.has(software))throw new Error("No server JAR was found in the imported archive.");
+    const t=Object.values(templates).find(x=>x.software===software)||templates.survival;
+    const x={id,name:req.body.name||path.basename(req.file.originalname).replace(/\.(zip|tar|gz|tgz)$/gi,""),template:"imported",type:req.body.type||"Imported",software,version:req.body.version||"Imported",port,rconPort,memory:safeNum(req.body.memory,t.memory,512,65536),cpu:safeNum(req.body.cpu,t.cpu,0.25,32),disk:safeNum(req.body.disk,t.disk,1,1000),maxPlayers:safeNum(req.body.maxPlayers,Number(props["max-players"])||20,1,5000),gamemode:req.body.gamemode||props.gamemode||"survival",permissions:[],eulaAccepted:true,autoStart:false,status:"stopped",container:null,rconPassword:crypto.randomBytes(18).toString("hex"),imported:true,jar:jar||null,createdAt:now(),updatedAt:now()};
+    db.instances[id]=x;save();await copyDirectoryToVolume(x,root);save();
+    res.json({...x,importedSoftware:detected,detectedPort:props["server-port"]||null});
+  }catch(e){res.status(400).json({error:e.message})}finally{try{fs.rmSync(temp,{recursive:true,force:true})}catch{}try{fs.unlinkSync(req.file.path)}catch{}}
+});
 app.post("/api/upload",auth,instanceAuth,upload.single("file"),async(req,res)=>{if(!req.file)return res.status(400).end();const dir=vpath(req.instance,req.body.path||"");const b=fs.readFileSync(req.file.path).toString("base64");fs.unlinkSync(req.file.path);try{await volumeCmd(req.instance,`mkdir -p '${dir}'; echo '${b}' | base64 -d > '${dir}/${path.basename(req.file.originalname).replaceAll("'","'\\''")}'`);res.json({ok:true})}catch(e){res.status(500).json({error:e.message})}});
 
 const BACKUP_VOLUME="blockhost_backups";

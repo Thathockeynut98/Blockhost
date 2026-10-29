@@ -42,3 +42,17 @@ The first account becomes `owner`.
 Minecraft EULA acceptance is intentionally explicit in the creation wizard. BlockHost does not silently accept it for you.
 
 The proxy integration uses `itzg/mc-proxy` and connects backend instances through the private Docker network. Velocity is the recommended proxy for new networks; Waterfall support is retained for compatibility.
+
+## Importing an existing Minecraft server
+
+From the dashboard choose **Import server** and upload a `.zip`, `.tar`, `.tar.gz`, or `.tgz` containing an existing server directory. BlockHost:
+
+- extracts the archive safely into a new isolated Docker volume
+- detects common server software (Vanilla, Paper, Spigot, Fabric, Forge, NeoForge, Velocity, Waterfall)
+- preserves worlds, `server.properties`, plugins, mods, configs and other files
+- reads the existing server port when available, otherwise allocates a free port
+- lets you choose RAM, CPU, port and max players
+- requires EULA confirmation when the imported server does not already contain `eula=true`
+- runs the imported server in its own BlockHost Docker container
+
+For large worlds, keep the browser open until the import completes. The current import upload limit is 8 GB.
