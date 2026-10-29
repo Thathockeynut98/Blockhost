@@ -6,13 +6,35 @@ async function login(){try{const j=await fetch('/api/auth/login',{method:'POST',
 async function register(){try{const j=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('user').value,password:$('pass').value})}).then(x=>x.json());if(!j.token)throw Error(j.error);TOKEN=j.token;localStorage.setItem('blockhost_token',TOKEN);boot()}catch(e){$('authMsg').textContent=e.message}}
 async function boot(){try{ME=await raw('/api/auth/me');$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('who').textContent=ME.username+' · '+ME.role;await acceptPendingInvite();await load()}catch(e){console.error(e)}}
 function logout(){TOKEN='';localStorage.removeItem('blockhost_token');location.reload()}
-async function load(){await loadInstances();await refresh();await loadSetup();await loadBackups();await loadSchedules();await loadUsers();if(dbTab==='proxy')loadBackends()}
+async function load(){await loadInstances();await refresh();await refreshTelemetry().catch(console.warn);await loadSetup();await loadBackups();await loadSchedules();await loadUsers();if(dbTab==='proxy')loadBackends()}
 async function loadInstances(){const xs=await raw('/api/instances');if(!xs.length)return;$('instanceSelect').innerHTML=xs.map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.type)}</option>`).join('');if(!xs.some(x=>x.id===INSTANCE))INSTANCE=xs[0].id;localStorage.setItem('blockhost_instance',INSTANCE);$('instanceSelect').value=INSTANCE}
-async function switchInstance(id){if(settingsDirty&&!confirm('Discard unsaved Minecraft settings?'))return;INSTANCE=id;localStorage.setItem('blockhost_instance',id);await refresh();if(dbTab==='settings')loadMinecraftSettings();if(dbTab==='console')refreshConsole(true)}
-async function refresh(){const s=await raw('/api/status');const x=s.instance;$('hero').innerHTML=`<div class="eyebrow">${esc(x.type)} SERVER</div><h2>${esc(x.name)}</h2><p>${esc(x.software)} · Minecraft ${esc(x.version)} · ${x.memory} MB RAM · ${x.cpu} CPU · public port ${x.port}</p><span class="pill">Docker: ${esc(x.container||'not created')}</span>`;$('status').textContent=s.status;$('playersCount').textContent='—';$('cpu').textContent=s.metrics.cpu.toFixed(1)+'%';$('cpuLimit').textContent='limit '+x.cpu+' CPU';$('ram').textContent=Math.round(s.metrics.ram/1048576)+' MB';$('ramLimit').textContent='limit '+x.memory+' MB';$('net').textContent=Math.round((s.metrics.rx+s.metrics.tx)/1024)+' KB total';$('port').textContent=x.port;$('containerName').textContent=x.container||'—';$('cpuBar').style.width=Math.min(100,s.metrics.cpu/Math.max(.1,x.cpu*100)*100)+'%';$('installRam').value=x.memory;$('installCpu').value=x.cpu;$('setName').value=x.name;$('setPort').value=x.port;$('setRam').value=x.memory;$('setCpu').value=x.cpu;$('setMax').value=x.maxPlayers||20;$('setMode').value=x.gamemode||'survival';try{const c=await raw('/api/console');$('dashConsole').textContent=c.slice(-60).join('\n')}catch{}} 
+async function switchInstance(id){if(settingsDirty&&!confirm('Discard unsaved Minecraft settings?'))return;INSTANCE=id;localStorage.setItem('blockhost_instance',id);await refresh();await refreshTelemetry().catch(console.warn);if(dbTab==='settings')loadMinecraftSettings();if(dbTab==='console')refreshConsole(true)}
+async function refresh(){const s=await raw('/api/status');const x=s.instance;$('hero').innerHTML=`<div class="eyebrow">${esc(x.type)} SERVER</div><h2>${esc(x.name)}</h2><p>${esc(x.software)} · Minecraft ${esc(x.version)} · ${x.memory} MB RAM · ${x.cpu} CPU · public port ${x.port}</p><span class="pill">Docker: ${esc(x.container||'not created')}</span>`;$('status').textContent=s.status;$('cpu').textContent=s.metrics.cpu.toFixed(1)+'%';$('cpuLimit').textContent='limit '+x.cpu+' CPU';$('ram').textContent=Math.round(s.metrics.ram/1048576)+' MB';$('ramLimit').textContent='limit '+x.memory+' MB';$('port').textContent=x.port;$('containerName').textContent=x.container||'—';$('cpuBar').style.width=Math.min(100,s.metrics.cpu/Math.max(.1,x.cpu*100)*100)+'%';$('installRam').value=x.memory;$('installCpu').value=x.cpu;$('setName').value=x.name;$('setPort').value=x.port;$('setRam').value=x.memory;$('setCpu').value=x.cpu;$('setMax').value=x.maxPlayers||20;$('setMode').value=x.gamemode||'survival';try{const c=await raw('/api/console');$('dashConsole').textContent=c.slice(-60).join('\n')}catch{}} 
 async function serverAction(a){try{await api(`/api/instances/${INSTANCE}/${a}`,'POST');setTimeout(refresh,500)}catch(e){alert(e.message)}}
 let dashboardPollTimer=null;let dashboardRefreshing=false;
-async function pollDashboard(){if(document.hidden||dbTab!=='dashboard'||dashboardRefreshing||!TOKEN)return;dashboardRefreshing=true;try{await refresh()}catch(e){console.warn('Dashboard refresh failed:',e.message)}finally{dashboardRefreshing=false}}
+const telemetryHistory=new Map();
+function drawHistory(id,points,key,unit){
+ const canvas=$(id);if(!canvas)return;const ctx=canvas.getContext('2d');if(!ctx)return;
+ const w=canvas.width,h=canvas.height;ctx.clearRect(0,0,w,h);
+ ctx.strokeStyle='#344155';ctx.lineWidth=1;for(let n=1;n<4;n++){const y=n*h/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
+ const vals=points.map(p=>p[key]);const max=Math.max(1,...vals)*1.1;
+ ctx.strokeStyle='#7bdcba';ctx.lineWidth=2;ctx.beginPath();
+ vals.forEach((v,i)=>{const x=8+i*Math.max(1,(w-16)/99),y=h-12-(v/max)*(h-24);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();
+ ctx.fillStyle='#9bb0c9';ctx.font='12px sans-serif';ctx.fillText(max.toFixed(1)+' '+unit,8,14);
+}
+async function refreshTelemetry(){
+ const t=await raw('/api/telemetry');
+ $('playersCount').textContent=t.players===null?'—':t.players+(t.maxPlayers!==null?' / '+t.maxPlayers:'');
+ $('rxRate').textContent=formatBytes(t.rxRate||0)+'/s';
+ $('txRate').textContent=formatBytes(t.txRate||0)+'/s';
+ $('tps').textContent=t.tps===null?'N/A':t.tps.toFixed(2);
+ $('mspt').textContent=t.mspt===null?'N/A':t.mspt.toFixed(2)+' ms';
+ $('net').textContent=formatBytes((t.rxRate||0)+(t.txRate||0))+'/s';
+ const key=INSTANCE;const points=telemetryHistory.get(key)||[];
+ if(t.running){points.push({at:t.timestamp,cpu:t.metrics.cpu,ram:t.metrics.ram/1048576});while(points.length>100)points.shift();telemetryHistory.set(key,points)}
+ drawHistory('cpuHistory',points,'cpu','%');drawHistory('ramHistory',points,'ram','MB');
+}
+async function pollDashboard(){if(document.hidden||dbTab!=='dashboard'||dashboardRefreshing||!TOKEN)return;dashboardRefreshing=true;try{await refreshTelemetry();await refresh()}catch(e){console.warn('Dashboard refresh failed:',e.message)}finally{dashboardRefreshing=false}}
 function startDashboardPolling(){if(dashboardPollTimer)clearInterval(dashboardPollTimer);dashboardPollTimer=setInterval(pollDashboard,3000)}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollDashboard()});
 let dbTab='dashboard';function tab(id){if(dbTab==='console')stopConsolePolling();dbTab=id;document.querySelectorAll('.tab').forEach(x=>x.classList.add('hidden'));$(id).classList.remove('hidden');if(id==='dashboard')pollDashboard();if(id==='files')listFiles();if(id==='publicAccess')refreshPublicAccess();if(id==='backups')loadBackups();if(id==='schedules')loadSchedules();if(id==='proxy')loadBackends();if(id==='players')loadPlayers();if(id==='settings')loadMinecraftSettings();if(id==='console')startConsolePolling()}
