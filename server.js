@@ -329,7 +329,7 @@ app.post("/api/instances/import",auth,admin,upload.single("archive"),async(req,r
   const temp=path.join(DATA,"imports",crypto.randomUUID());fs.mkdirSync(temp,{recursive:true});
   try{
     const name=req.file.originalname.toLowerCase();
-    if(name.endsWith(".zip"))await new Promise((resolve,reject)=>execFile("unzip",["-q",req.file.path,"-d",temp],e=>e?reject(e):resolve()));
+    if(name.endsWith(".zip"))await new Promise((resolve,reject)=>execFile("unzip",["-q",req.file.path,"-d",temp],e=>e?reject(new Error("The uploaded ZIP could not be extracted. It may be incomplete or damaged. Test the original archive on your computer, create a new ZIP, or use Existing Minecraft server folder instead.")):resolve()));
     else if(name.endsWith(".tar.gz")||name.endsWith(".tgz"))await new Promise((resolve,reject)=>execFile("tar",["-xzf",req.file.path,"-C",temp],e=>e?reject(e):resolve()));
     else if(name.endsWith(".tar"))await new Promise((resolve,reject)=>execFile("tar",["-xf",req.file.path,"-C",temp],e=>e?reject(e):resolve()));
     else throw new Error("Unsupported archive. Use ZIP, TAR, or TAR.GZ.");
